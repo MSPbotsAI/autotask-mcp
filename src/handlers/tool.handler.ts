@@ -24,7 +24,7 @@ function resolveEnhanceConcurrency(raw: string | undefined): number {
 
 // Fields accepted by autotask_create_ticket / autotask_update_ticket.
 // Keep this list in sync with the tool definitions in tool.definitions.ts.
-const TICKET_WRITABLE_FIELDS = [
+export const TICKET_WRITABLE_FIELDS = [
   'companyID',
   'title',
   'description',

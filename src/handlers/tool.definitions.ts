@@ -701,6 +701,10 @@ export const TOOL_DEFINITIONS: McpTool[] = [
           type: 'number',
           description: 'Contact ID for the ticket'
         },
+        queueID: {
+          type: 'number',
+          description: 'Queue ID to route the ticket to. Use autotask_list_queues to discover valid IDs. Autotask refuses an assignedResourceID whose resource serves no queue on the ticket, so send this alongside assignedResourceID when moving a ticket across queues.'
+        },
         issueType: {
           type: 'number',
           description: 'First-level issue type ID (picklist). Required context for subIssueType. Use autotask_get_field_info (entityType "Tickets", fieldName "issueType") to discover valid values.'
