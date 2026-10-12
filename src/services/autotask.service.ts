@@ -367,7 +367,25 @@ export class AutotaskService {
     const http = await this.ensureClient();
     try {
       this.logger.debug('Creating contact:', contact);
-      const id = await http.create('Contacts', contact);
+      let id: number;
+      try {
+        id = await http.create('Contacts', contact);
+      } catch (err) {
+        // Same zone hosts as updateContact(): the collection-level
+        // POST /Contacts is not registered and returns an IIS HTML 404.
+        // Contacts are a child entity of Companies, so retry through the
+        // documented child route POST /Companies/{companyID}/Contacts. Gated
+        // on 404/405 so genuine validation errors (400/422) surface unchanged;
+        // a 404 never creates a record, so the retry cannot duplicate one.
+        const status = (err as { status?: number })?.status;
+        if (status !== 404 && status !== 405) throw err;
+        const companyID = (contact as Record<string, any>).companyID as number | null | undefined;
+        if (companyID === undefined || companyID === null) throw err;
+        this.logger.debug(
+          `Contact create failed with HTTP ${status} — retrying via Companies/${companyID}/Contacts child route`
+        );
+        id = await http.childCreate('Companies', companyID, 'Contacts', contact);
+      }
       this.logger.info(`Contact created with ID: ${id}`);
       return id;
     } catch (error) {

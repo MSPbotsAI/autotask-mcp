@@ -191,3 +191,76 @@ describe('AutotaskService.updateContact() child-route fallback (PR #197)', () =>
     );
   });
 });
+
+// PRD-20217: the same zone hosts also reject the collection-level
+// `POST /Contacts` with an IIS HTML 404, so contact creation failed outright.
+// createContact() now retries through `POST /Companies/{companyID}/Contacts`.
+describe('AutotaskService.createContact() child-route fallback', () => {
+  test('falls back to POST /Companies/{companyID}/Contacts when POST /Contacts returns 404', async () => {
+    const fetchMock = mockFetchRoutes([
+      { method: 'POST', path: /v1\.0\/Contacts$/, response: HTML_404 },
+      { method: 'POST', path: /\/Companies\/777\/Contacts$/, response: { status: 200, body: { itemId: 999 } } },
+    ]);
+
+    const service = new AutotaskService(config, logger);
+    await expect(
+      service.createContact({ companyID: 777, firstName: 'Tina', lastName: 'Test' } as any)
+    ).resolves.toBe(999);
+
+    expect(calledRoutes(fetchMock)).toEqual([
+      'POST /ATServicesRest/v1.0/Contacts',
+      'POST /ATServicesRest/v1.0/Companies/777/Contacts',
+    ]);
+    const childBody = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    expect(childBody).toMatchObject({ companyID: 777, firstName: 'Tina', lastName: 'Test' });
+  });
+
+  test('treats companyID 0 as a valid parent', async () => {
+    const fetchMock = mockFetchRoutes([
+      { method: 'POST', path: /v1\.0\/Contacts$/, response: HTML_404 },
+      { method: 'POST', path: /\/Companies\/0\/Contacts$/, response: { status: 200, body: { itemId: 999 } } },
+    ]);
+
+    const service = new AutotaskService(config, logger);
+    await expect(
+      service.createContact({ companyID: 0, firstName: 'Tina', lastName: 'Test' } as any)
+    ).resolves.toBe(999);
+    expect(calledRoutes(fetchMock)).toContain('POST /ATServicesRest/v1.0/Companies/0/Contacts');
+  });
+
+  test('healthy zones keep the single-request POST /Contacts path', async () => {
+    const fetchMock = mockFetchRoutes([
+      { method: 'POST', path: /v1\.0\/Contacts$/, response: { status: 200, body: { itemId: 999 } } },
+    ]);
+
+    const service = new AutotaskService(config, logger);
+    await expect(
+      service.createContact({ companyID: 777, firstName: 'Tina', lastName: 'Test' } as any)
+    ).resolves.toBe(999);
+    expect(calledRoutes(fetchMock)).toEqual(['POST /ATServicesRest/v1.0/Contacts']);
+  });
+
+  test('genuine validation errors (HTTP 400) surface unchanged — no fallback', async () => {
+    const fetchMock = mockFetchRoutes([
+      { method: 'POST', path: /v1\.0\/Contacts$/, response: { status: 400, body: { errors: ['firstName is required'] } } },
+    ]);
+
+    const service = new AutotaskService(config, logger);
+    await expect(
+      service.createContact({ companyID: 777, lastName: 'Test' } as any)
+    ).rejects.toThrow(/HTTP 400/);
+    expect(calledRoutes(fetchMock)).toEqual(['POST /ATServicesRest/v1.0/Contacts']);
+  });
+
+  test('rethrows the original 404 when companyID is missing', async () => {
+    const fetchMock = mockFetchRoutes([
+      { method: 'POST', path: /v1\.0\/Contacts$/, response: HTML_404 },
+    ]);
+
+    const service = new AutotaskService(config, logger);
+    await expect(
+      service.createContact({ firstName: 'Tina', lastName: 'Test' } as any)
+    ).rejects.toThrow(/HTTP 404/);
+    expect(calledRoutes(fetchMock)).toEqual(['POST /ATServicesRest/v1.0/Contacts']);
+  });
+});
