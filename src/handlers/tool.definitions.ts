@@ -2640,7 +2640,7 @@ export const TOOL_DEFINITIONS: McpTool[] = [
   },
   {
     name: 'autotask_search_billing_codes',
-    description: 'Search Autotask billing codes (allocation codes). A ticket\'s "Work Type" is a billing code: use this to find the billingCodeID for autotask_create_ticket / autotask_update_ticket. Also covers material, expense and internal time codes; each result carries useType and its label so you can tell them apart. Returns active codes only unless includeInactive is true.',
+    description: 'Search Autotask billing codes (allocation codes). A ticket\'s "Work Type" is a billing code: use this to find the billingCodeID for autotask_create_ticket / autotask_update_ticket (pass useType 1 to get only Work Types). Also covers material, expense and internal time codes; each result carries useType and its label so you can tell them apart. Returns active codes only unless includeInactive is true.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2650,7 +2650,7 @@ export const TOOL_DEFINITIONS: McpTool[] = [
         },
         useType: {
           type: 'number',
-          description: 'Optional: filter by use type ID. Results show each code\'s useType and useTypeLabel; use autotask_get_field_info (entityType "BillingCodes", fieldName "useType") for the full list.'
+          description: 'Optional: filter by use type ID. Ticket Work Types are useType 1 (General Allocation Code); internal time is 3. Results show each code\'s useType and useTypeLabel; use autotask_get_field_info (entityType "BillingCodes", fieldName "useType") for the full list.'
         },
         includeInactive: {
           type: 'boolean',
