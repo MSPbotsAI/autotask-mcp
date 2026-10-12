@@ -500,7 +500,7 @@ Use autotask_list_categories to discover available tool categories, then autotas
 - Utility: test connection
 
 ## Picklist Discovery:
-Use autotask_list_queues, autotask_list_ticket_statuses, or autotask_list_ticket_priorities to discover valid IDs before filtering. Use autotask_get_field_info for any entity's field definitions and picklist values.
+Use autotask_list_queues, autotask_list_ticket_statuses, or autotask_list_ticket_priorities to discover valid IDs before filtering. Use autotask_get_field_info for any entity's field definitions and picklist values. A ticket's Work Type (billingCodeID) is not a picklist; use autotask_search_billing_codes to find it.
 
 ## ID-to-Name Mapping:
 All search and detail tools automatically include human-readable names for company and resource IDs in an _enhanced field on each result.

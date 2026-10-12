@@ -30,6 +30,7 @@ const FULL_SUITE = [
   { name: 'autotask_list_queues', args: {} },
   { name: 'autotask_list_ticket_statuses', args: {} },
   { name: 'autotask_list_ticket_priorities', args: {} },
+  { name: 'autotask_search_billing_codes', args: {} },
 ];
 
 function loadEnv() {

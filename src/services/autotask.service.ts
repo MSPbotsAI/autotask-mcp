@@ -3052,14 +3052,18 @@ export class AutotaskService {
     }
   }
 
-  async searchBillingCodes(_options: AutotaskQueryOptionsExtended = {}): Promise<AutotaskBillingCode[]> {
+  async searchBillingCodes(
+    options: { name?: string; useType?: number; includeInactive?: boolean } = {}
+  ): Promise<AutotaskBillingCode[]> {
     const http = await this.ensureClient();
+    const filter: QueryFilter[] = [];
+    if (!options.includeInactive) filter.push({ op: 'eq', field: 'isActive', value: true });
+    if (options.name) filter.push({ op: 'contains', field: 'name', value: options.name });
+    if (options.useType !== undefined) filter.push({ op: 'eq', field: 'useType', value: options.useType });
+    // Autotask rejects an empty filter; this matches every billing code.
+    if (filter.length === 0) filter.push({ op: 'gte', field: 'id', value: 0 });
     try {
-      return await http.query<AutotaskBillingCode>(
-        'BillingCodes',
-        [{ op: 'eq', field: 'isActive', value: true }],
-        { maxRecords: 500 }
-      );
+      return await http.query<AutotaskBillingCode>('BillingCodes', filter, { maxRecords: 500 });
     } catch (error) {
       this.logger.error('Failed to search billing codes:', error);
       throw error;

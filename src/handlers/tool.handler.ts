@@ -735,6 +735,16 @@ export class AutotaskToolHandler {
       };
     }
 
+    // Work type / billing code lookups (checked before the generic "billing" → invoices route)
+    if (/\b(?:work\s*types?|billing\s*codes?|allocation\s*codes?)\b/.test(intent)) {
+      return {
+        suggestedTool: 'autotask_search_billing_codes',
+        suggestedParams: {},
+        description: 'Search billing codes (ticket work types)',
+        requiredParams: [],
+      };
+    }
+
     // Invoice operations
     if (/\b(?:invoice|bill|billing)\b/.test(intent)) {
       return {
@@ -1466,6 +1476,22 @@ export class AutotaskToolHandler {
       ['autotask_list_ticket_priorities', async () => {
         const priorities = await this.picklistCache.getTicketPriorities();
         return { result: priorities.map(p => ({ id: p.value, name: p.label, isActive: p.isActive })), message: `Found ${priorities.length} ticket priorities` };
+      }],
+      ['autotask_search_billing_codes', async (a) => {
+        const [codes, useTypes] = await Promise.all([
+          s.searchBillingCodes({ name: a.name, useType: a.useType, includeInactive: a.includeInactive }),
+          this.picklistCache.getPicklistValues('BillingCodes', 'useType').catch(() => []),
+        ]);
+        const useTypeLabels = new Map(useTypes.map(u => [String(u.value), u.label]));
+        const result = codes.map(c => ({
+          id: c.id,
+          name: c.name,
+          description: c.description,
+          useType: c.useType,
+          useTypeLabel: c.useType !== undefined ? useTypeLabels.get(String(c.useType)) : undefined,
+          isActive: c.isActive,
+        }));
+        return { result, message: `Found ${result.length} billing codes` };
       }],
       ['autotask_get_field_info', async (a) => {
         // LLMs commonly pass `entity`/`field` instead of `entityType`/`fieldName`

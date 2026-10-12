@@ -616,7 +616,7 @@ export const TOOL_DEFINITIONS: McpTool[] = [
         },
         billingCodeID: {
           type: 'number',
-          description: 'Work type / billing code ID used for billing this ticket.'
+          description: 'Work type (billing code) ID used for billing this ticket. Not a picklist, so autotask_get_field_info cannot list it; use autotask_search_billing_codes to find valid IDs.'
         },
         serviceLevelAgreementID: {
           type: 'number',
@@ -712,6 +712,10 @@ export const TOOL_DEFINITIONS: McpTool[] = [
         subIssueType: {
           type: 'number',
           description: 'Sub issue type ID (picklist). Must be valid for the selected issueType. Use autotask_get_field_info (entityType "Tickets", fieldName "subIssueType") to discover valid values.'
+        },
+        billingCodeID: {
+          type: 'number',
+          description: 'Work type (billing code) ID used for billing this ticket. Use autotask_search_billing_codes to find valid IDs.'
         }
       },
       required: ['ticketId']
@@ -797,7 +801,7 @@ export const TOOL_DEFINITIONS: McpTool[] = [
         },
         billingCodeID: {
           type: 'number',
-          description: 'Billing code ID for categorization'
+          description: 'Billing code ID for categorization. Use autotask_search_billing_codes to find valid IDs.'
         },
         billableToAccount: {
           type: 'boolean',
@@ -2635,6 +2639,29 @@ export const TOOL_DEFINITIONS: McpTool[] = [
     }
   },
   {
+    name: 'autotask_search_billing_codes',
+    description: 'Search Autotask billing codes (allocation codes). A ticket\'s "Work Type" is a billing code: use this to find the billingCodeID for autotask_create_ticket / autotask_update_ticket. Also covers material, expense and internal time codes; each result carries useType and its label so you can tell them apart. Returns active codes only unless includeInactive is true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Optional: substring of the billing code name (e.g. "Remote")'
+        },
+        useType: {
+          type: 'number',
+          description: 'Optional: filter by use type ID. Results show each code\'s useType and useTypeLabel; use autotask_get_field_info (entityType "BillingCodes", fieldName "useType") for the full list.'
+        },
+        includeInactive: {
+          type: 'boolean',
+          description: 'Include inactive billing codes (default: false)'
+        }
+      },
+      required: []
+    },
+    annotations: { readOnlyHint: true }
+  },
+  {
     name: 'autotask_get_field_info',
     description: 'Get field definitions for an Autotask entity type, including picklist values. Useful for discovering valid values for any picklist field.',
     inputSchema: {
@@ -3310,7 +3337,7 @@ export const TOOL_DEFINITIONS: McpTool[] = [
 export const TOOL_CATEGORIES: Record<string, { description: string; tools: string[] }> = {
   utility: {
     description: 'Connection testing and field/picklist discovery',
-    tools: ['autotask_test_connection', 'autotask_list_queues', 'autotask_list_ticket_statuses', 'autotask_list_ticket_priorities', 'autotask_get_field_info']
+    tools: ['autotask_test_connection', 'autotask_list_queues', 'autotask_list_ticket_statuses', 'autotask_list_ticket_priorities', 'autotask_search_billing_codes', 'autotask_get_field_info']
   },
   companies: {
     description: 'Search, create, and update companies',
