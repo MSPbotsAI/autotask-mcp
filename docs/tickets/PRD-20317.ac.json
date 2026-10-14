@@ -1,0 +1,50 @@
+[
+  {
+    "id": "TC1",
+    "ac": "AC1",
+    "type": "auto",
+    "source": "dev",
+    "text": "Given a caller invokes autotask_search_contacts without includeUserDefinedFields (or with it explicitly false), When the search returns matched contacts, Then no item in the response contains a userDefinedFields key and the response is otherwise identical in shape to today's",
+    "tests": ["tests/contact-search-custom-fields.test.ts > does not include userDefinedFields or request it from Autotask by default"]
+  },
+  {
+    "id": "TC2",
+    "ac": "AC2",
+    "type": "auto",
+    "source": "dev",
+    "text": "Given a contact has one or more Autotask custom fields set, When autotask_search_contacts is called with includeUserDefinedFields: true, Then that contact's item in the response includes a userDefinedFields array with that contact's actual name/value pairs",
+    "tests": ["tests/contact-search-custom-fields.test.ts > returns a matched contact's actual custom fields when includeUserDefinedFields is true"]
+  },
+  {
+    "id": "TC3",
+    "ac": "AC3",
+    "type": "auto",
+    "source": "dev",
+    "text": "Given a contact has no custom fields set in Autotask, When autotask_search_contacts is called with includeUserDefinedFields: true, Then the call does not error and that contact's item does not contain fabricated userDefinedFields data (key absent or an empty array)",
+    "tests": ["tests/contact-search-custom-fields.test.ts > does not fabricate userDefinedFields for a contact with none set"]
+  },
+  {
+    "id": "TC4",
+    "ac": "AC4",
+    "type": "auto",
+    "source": "dev",
+    "text": "Given includeUserDefinedFields: true, When autotask_search_contacts returns matched contacts, Then every field normally present in the response today (id, firstName, lastName, emailAddress, companyID, and the enhanced company name when resolvable) is still present and unchanged",
+    "tests": ["tests/contact-search-custom-fields.test.ts > still returns every normally-returned field when includeUserDefinedFields is true"]
+  },
+  {
+    "id": "TC5",
+    "ac": "AC5",
+    "type": "auto",
+    "source": "dev",
+    "text": "Given includeUserDefinedFields: true, When the search matches zero contacts, Then the tool returns the existing empty-result shape (0 items, 'Found 0 contacts') without error",
+    "tests": ["tests/contact-search-custom-fields.test.ts > returns an empty result without error when nothing matches"]
+  },
+  {
+    "id": "TC6",
+    "ac": "AC6",
+    "type": "auto",
+    "source": "dev",
+    "text": "Given a caller filters by companyID and passes includeUserDefinedFields: true, When autotask_search_contacts runs, Then only contacts belonging to that companyID are returned (with their custom fields) -- the new flag does not relax or bypass the existing company-scoping filter and cannot be used to retrieve another company's contacts or their custom fields",
+    "tests": ["tests/contact-search-custom-fields.test.ts > includeUserDefinedFields does not relax the existing companyID filter"]
+  }
+]
