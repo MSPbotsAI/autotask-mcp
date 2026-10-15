@@ -352,7 +352,13 @@ export class AutotaskService {
       const contacts = await http.query<AutotaskContact>(
         'Contacts',
         filters.length > 0 ? filters : MATCH_ALL,
-        { maxRecords: pageSize }
+        {
+          maxRecords: pageSize,
+          // PRD-20317: only set when the caller opted into userDefinedFields —
+          // omitting the key entirely keeps the default request byte-identical
+          // to today's.
+          ...(options.includeFields?.length ? { includeFields: options.includeFields } : {}),
+        }
       );
 
       this.logger.info(`Retrieved ${contacts.length} contacts (pageSize ${pageSize})`);

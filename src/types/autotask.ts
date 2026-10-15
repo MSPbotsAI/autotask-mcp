@@ -31,6 +31,7 @@ export interface AutotaskContact {
   isActive?: number; // Note: autotask-node uses number, not boolean
   createDate?: string;
   lastModifiedDate?: string;
+  userDefinedFields?: AutotaskUserDefinedField[]; // PRD-20317: opt-in via autotask_search_contacts
   [key: string]: any;
 }
 
@@ -677,6 +678,7 @@ export interface AutotaskQueryOptions {
   searchTerm?: string;
   companyID?: number;
   isActive?: boolean | number;
+  includeFields?: string[]; // PRD-20317: forwarded to AutotaskHttpClient.query()'s IncludeFields
 }
 
 // Extended query options for more advanced queries

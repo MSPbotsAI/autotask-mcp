@@ -6,7 +6,7 @@ import { AutotaskService } from '../services/autotask.service.js';
 import { AutotaskRateLimitError } from '../services/autotask-http.js';
 import { PicklistCache, PicklistValue } from '../services/picklist.cache.js';
 import { Logger } from '../utils/logger.js';
-import { formatCompactResponse, detectEntityType, COMPACT_SEARCH_TOOLS } from '../utils/response.formatter.js';
+import { formatCompactResponse, detectEntityType, COMPACT_SEARCH_TOOLS, SUMMARY_FIELDS } from '../utils/response.formatter.js';
 import { MappingService } from '../utils/mapping.service.js';
 import { mapWithConcurrency } from '../utils/concurrency.js';
 import { TOOL_DEFINITIONS, TOOL_CATEGORIES } from './tool.definitions.js';
@@ -887,7 +887,15 @@ export class AutotaskToolHandler {
 
       // Contacts
       ['autotask_search_contacts', async (a) => {
-        const r = await s.searchContacts(a); return { result: r, message: `Found ${r.length} contacts` };
+        // PRD-20317: includeUserDefinedFields is opt-in UI surface, not an Autotask
+        // query option — strip it before building the service call, and translate
+        // it into an explicit includeFields superset so a restrictive IncludeFields
+        // semantic on Autotask's side still returns every field we show by default.
+        const { includeUserDefinedFields, ...rest } = a;
+        const r = includeUserDefinedFields
+          ? await s.searchContacts({ ...rest, includeFields: [...SUMMARY_FIELDS.contacts, 'userDefinedFields'] })
+          : await s.searchContacts(rest);
+        return { result: r, message: `Found ${r.length} contacts` };
       }],
       ['autotask_create_contact', async (a) => {
         const id = await s.createContact(a); return { result: id, message: `Successfully created contact with ID: ${id}` };
@@ -1677,9 +1685,14 @@ export class AutotaskToolHandler {
       if (COMPACT_SEARCH_TOOLS.has(name) && Array.isArray(result)) {
         const entityType = detectEntityType(name);
         if (entityType) {
+          // PRD-20317: undefined for every tool other than autotask_search_contacts
+          // (no other schema exposes includeUserDefinedFields), so extraFields stays
+          // undefined and their formatted output is unaffected.
+          const extraFields = args.includeUserDefinedFields ? ['userDefinedFields'] : undefined;
           const compact = formatCompactResponse(result, entityType, {
             page: args.page,
             pageSize: args.pageSize,
+            extraFields,
           });
           compact.items = await this.enhanceItems(compact.items);
           responseText = JSON.stringify(compact);
