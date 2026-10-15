@@ -363,8 +363,15 @@ export class AutotaskService {
     }
   }
 
-  async createContact(contact: Partial<AutotaskContact>): Promise<number> {
+  async createContact(input: Partial<AutotaskContact>): Promise<number> {
     const http = await this.ensureClient();
+    // isActive is a required field on Autotask Contacts: omitting it fails the
+    // create with HTTP 500 "Missing Required Field: isActive". LLM callers
+    // routinely leave it out, so default to active (1) unless the caller set
+    // it explicitly — an explicit 0 is kept. Applied once, before either
+    // route below, so the child-route fallback sends the same body.
+    // (MSPbots PRD-20217.)
+    const contact: Partial<AutotaskContact> = { ...input, isActive: input.isActive ?? 1 };
     try {
       this.logger.debug('Creating contact:', contact);
       let id: number;

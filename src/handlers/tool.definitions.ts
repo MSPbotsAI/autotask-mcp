@@ -370,6 +370,11 @@ export const TOOL_DEFINITIONS: McpTool[] = [
         title: {
           type: 'string',
           
+        },
+        isActive: {
+          type: 'number',
+          description: 'Active status (1=active, 0=inactive). Required by Autotask; defaults to 1 (active) when omitted.',
+          default: 1
         }
       },
       required: ['companyID', 'firstName', 'lastName']
