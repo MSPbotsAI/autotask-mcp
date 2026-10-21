@@ -1,0 +1,52 @@
+[
+  {
+    "id": "TC1",
+    "ac": "AC1",
+    "text": "Given 5 active eligible technicians in a queue, each starting at 0 open tickets, when 10 tickets are assigned concurrently via autotask_assign_least_loaded_resource, then every technician ends up with exactly 2 tickets (max-min spread across technicians <= 1)",
+    "type": "auto",
+    "tests": ["tests/assign-least-loaded.test.ts::spreads_concurrent_assignments_evenly_across_eligible_resources"]
+  },
+  {
+    "id": "TC2",
+    "ac": "AC2",
+    "text": "Given a queue has exactly 1 active eligible technician, when 5 tickets are assigned, then all 5 go to that technician and no call errors",
+    "type": "auto",
+    "tests": ["tests/assign-least-loaded.test.ts::assigns_all_tickets_to_the_sole_eligible_resource"]
+  },
+  {
+    "id": "TC3",
+    "ac": "AC3",
+    "text": "Given 3 eligible technicians with existing open-ticket counts of 5, 0, and 3, when 1 new ticket is assigned, then it goes to the technician with count 0",
+    "type": "auto",
+    "tests": ["tests/assign-least-loaded.test.ts::picks_the_resource_with_the_fewest_open_tickets"]
+  },
+  {
+    "id": "TC4",
+    "ac": "AC4",
+    "text": "Given two assignment calls for the same queue are issued so their internal counting steps would overlap without serialization, when both complete, then the second call's decision reflects the first call's result, not a stale snapshot -- the two calls never both pick the same resource off the same count",
+    "type": "auto",
+    "tests": ["tests/assign-least-loaded.test.ts::serializes_overlapping_calls_for_the_same_queue"]
+  },
+  {
+    "id": "TC5",
+    "ac": "AC5",
+    "text": "Given a queue has zero active eligible technicians, when a ticket is assigned, then the tool throws a distinct NoEligibleResourceError and neither createTicket nor updateTicket is called",
+    "type": "auto",
+    "tests": ["tests/assign-least-loaded.test.ts::rejects_assignment_when_no_eligible_resource_exists"]
+  },
+  {
+    "id": "TC6",
+    "ac": "AC1",
+    "text": "Given a live Autotask sandbox/INT queue with 3 or more active technicians, when 5 test-prefixed tickets are created through autotask_assign_least_loaded_resource, then the Autotask UI shows assignees spread per the least-open-count rule and each assignedResourceID matches what the tool reported",
+    "type": "manual",
+    "steps": [
+      "In INT/staging with real Autotask credentials, identify a queue with 3 or more active technicians",
+      "Call autotask_assign_least_loaded_resource 5 times with a clearly test-prefixed ticket title",
+      "Open the queue in the Autotask UI and record each ticket's assignee",
+      "Compare against the tool's reported assignedResourceID for each call"
+    ],
+    "expect": "Assignees are spread (no single technician holds more than ceil(5/3)=2 of the 5 tickets) and the UI's assignee matches the tool's reported assignedResourceID for every ticket",
+    "result": "untested",
+    "evidence": "NOT EXECUTED: this sandbox has no AUTOTASK_USERNAME/AUTOTASK_SECRET credentials; needs dev/QA with live Autotask access after implementation"
+  }
+]
