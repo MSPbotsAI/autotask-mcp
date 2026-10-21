@@ -6,7 +6,7 @@ import { AutotaskService } from '../services/autotask.service.js';
 import { AutotaskRateLimitError } from '../services/autotask-http.js';
 import { PicklistCache, PicklistValue } from '../services/picklist.cache.js';
 import { Logger } from '../utils/logger.js';
-import { formatCompactResponse, detectEntityType, COMPACT_SEARCH_TOOLS, SUMMARY_FIELDS } from '../utils/response.formatter.js';
+import { formatCompactResponse, detectEntityType, COMPACT_SEARCH_TOOLS } from '../utils/response.formatter.js';
 import { MappingService } from '../utils/mapping.service.js';
 import { mapWithConcurrency } from '../utils/concurrency.js';
 import { TOOL_DEFINITIONS, TOOL_CATEGORIES } from './tool.definitions.js';
@@ -902,14 +902,17 @@ export class AutotaskToolHandler {
 
       // Contacts
       ['autotask_search_contacts', async (a) => {
-        // PRD-20317: includeUserDefinedFields is opt-in UI surface, not an Autotask
-        // query option — strip it before building the service call, and translate
-        // it into an explicit includeFields superset so a restrictive IncludeFields
-        // semantic on Autotask's side still returns every field we show by default.
+        // PRD-20317 r2: includeUserDefinedFields is opt-in UI surface, not an
+        // Autotask query option — strip it before building the service call.
+        // Do NOT turn it into an IncludeFields override: Autotask rejects
+        // 'userDefinedFields' inside IncludeFields with HTTP 500 ("Unable to
+        // find userDefinedFields in the Contact Entity"), confirmed against
+        // the real API 2026-10-21. Autotask includes userDefinedFields by
+        // default when no IncludeFields is sent, so the flag only needs to
+        // let it survive the formatter's compact allowlist (extraFields,
+        // see formatCompactResponse call site below).
         const { includeUserDefinedFields, ...rest } = a;
-        const r = includeUserDefinedFields
-          ? await s.searchContacts({ ...rest, includeFields: [...SUMMARY_FIELDS.contacts, 'userDefinedFields'] })
-          : await s.searchContacts(rest);
+        const r = await s.searchContacts(rest);
         return { result: r, message: `Found ${r.length} contacts` };
       }],
       ['autotask_create_contact', async (a) => {

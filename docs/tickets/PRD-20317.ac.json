@@ -47,5 +47,13 @@
     "source": "dev",
     "text": "Given a caller filters by companyID and passes includeUserDefinedFields: true, When autotask_search_contacts runs, Then only contacts belonging to that companyID are returned (with their custom fields) -- the new flag does not relax or bypass the existing company-scoping filter and cannot be used to retrieve another company's contacts or their custom fields",
     "tests": ["tests/contact-search-custom-fields.test.ts > opt-in: companyID filter is not relaxed -- no cross-company leak"]
+  },
+  {
+    "id": "TC7",
+    "ac": "AC2",
+    "type": "auto",
+    "source": "dev",
+    "text": "r2 regression guard (not in the groomed AC ledger; added after QA found r1's mock accepted an Autotask request shape the real API rejects, comment 90170265051691): Given includeUserDefinedFields: true, When autotask_search_contacts builds its Autotask request, Then that request never carries IncludeFields at all (so it cannot trigger Autotask's real HTTP 500 'Unable to find userDefinedFields in the Contact Entity'); and the mock itself is verified to reproduce that real HTTP 500 when something does send IncludeFields:['userDefinedFields'], so this guard would catch a future regression from any call site, not just today's",
+    "tests": ["tests/contact-search-custom-fields.test.ts > opt-in: returns the actual userDefinedFields for a contact that has them (IncludeFields assertion)", "tests/contact-search-custom-fields.test.ts > regression: Autotask's real IncludeFields:['userDefinedFields'] rejection is reproduced by the mock"]
   }
 ]
