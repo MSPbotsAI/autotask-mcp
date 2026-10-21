@@ -726,6 +726,72 @@ export const TOOL_DEFINITIONS: McpTool[] = [
       required: ['ticketId']
     }
   },
+  {
+    name: 'autotask_assign_least_loaded_resource',
+    description: 'Assign a ticket (existing or brand-new) to whichever active technician eligible for the given queue currently has the fewest open tickets there, instead of the caller naming a specific resource. Calls for the same queue serialize internally, so tickets processed back-to-back or concurrently spread across the team instead of all landing on the same person (PRD-20620). Give exactly one of ticketID (to reassign) or createTicket (to create-and-assign in one call).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        queueID: {
+          type: 'number',
+          description: 'Queue ID to pick an eligible technician from. Use autotask_list_queues to discover valid IDs.'
+        },
+        ticketID: {
+          type: 'number',
+          description: 'Existing ticket ID to reassign. Give this or createTicket, not both.'
+        },
+        createTicket: {
+          type: 'object',
+          description: 'Fields for a new ticket to create-and-assign in one call — same shape as autotask_create_ticket, minus assignedResourceID (that field is computed by this tool, not supplied). Give this or ticketID, not both.',
+          properties: {
+            companyID: { type: 'number', description: 'Company ID for the ticket' },
+            title: { type: 'string' },
+            description: { type: 'string' },
+            status: { type: 'number' },
+            priority: { type: 'number' },
+            contactID: { type: 'number', description: 'Contact ID for the ticket' },
+            dueDateTime: {
+              type: 'string',
+              description: 'Due date and time in ISO 8601 format. Autotask REQUIRES this on every new ticket unless the ticket category supplies a default.'
+            },
+            ticketCategory: { type: 'number', description: 'Ticket category ID (picklist).' },
+            ticketType: { type: 'number', description: 'Ticket type ID (picklist).' },
+            issueType: { type: 'number', description: 'First-level issue type ID (picklist).' },
+            subIssueType: { type: 'number', description: 'Sub issue type ID (picklist).' },
+            source: { type: 'number', description: 'Ticket source ID (picklist).' },
+            billingCodeID: { type: 'number', description: 'Work type (billing code) ID. Use autotask_search_billing_codes to find valid IDs.' },
+            serviceLevelAgreementID: { type: 'number', description: 'Service Level Agreement (SLA) ID to apply to the ticket.' },
+            estimatedHours: { type: 'number', description: 'Estimated hours of work for the ticket.' },
+            projectID: { type: 'number', description: 'Project ID to associate the ticket with.' },
+            ticketAdditionalContacts: {
+              type: 'array',
+              items: { type: 'number' },
+              description: 'Additional contact IDs to associate with the ticket.'
+            },
+            resolution: { type: 'string', description: 'Ticket-level resolution text.' },
+            userDefinedFields: {
+              type: 'array',
+              description: 'User-defined (custom) fields for the ticket, as an array of { name, value } objects.',
+              items: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string', description: 'UDF name' },
+                  value: { type: 'string', description: 'UDF value (stringified)' }
+                },
+                required: ['name', 'value']
+              }
+            }
+          },
+          required: ['companyID', 'title', 'description']
+        },
+        roleName: {
+          type: 'string',
+          description: 'Name of the chosen resource\'s role, e.g. "Help Desk", used instead of auto-resolving when that resource holds several active roles.'
+        }
+      },
+      required: ['queueID']
+    }
+  },
 
   // Ticket Charge tools
   {
@@ -3354,7 +3420,7 @@ export const TOOL_CATEGORIES: Record<string, { description: string; tools: strin
   },
   tickets: {
     description: 'Search, create, update tickets and manage ticket notes, attachments, charges, and audit history',
-    tools: ['autotask_search_tickets', 'autotask_get_ticket_details', 'autotask_create_ticket', 'autotask_update_ticket', 'autotask_get_ticket_note', 'autotask_search_ticket_notes', 'autotask_create_ticket_note', 'autotask_get_ticket_attachment', 'autotask_search_ticket_attachments', 'autotask_create_ticket_attachment', 'autotask_get_ticket_note_attachment', 'autotask_search_ticket_note_attachments', 'autotask_get_ticket_charge', 'autotask_search_ticket_charges', 'autotask_create_ticket_charge', 'autotask_update_ticket_charge', 'autotask_delete_ticket_charge', 'autotask_get_ticket_history', 'autotask_search_ticket_history']
+    tools: ['autotask_search_tickets', 'autotask_get_ticket_details', 'autotask_create_ticket', 'autotask_update_ticket', 'autotask_assign_least_loaded_resource', 'autotask_get_ticket_note', 'autotask_search_ticket_notes', 'autotask_create_ticket_note', 'autotask_get_ticket_attachment', 'autotask_search_ticket_attachments', 'autotask_create_ticket_attachment', 'autotask_get_ticket_note_attachment', 'autotask_search_ticket_note_attachments', 'autotask_get_ticket_charge', 'autotask_search_ticket_charges', 'autotask_create_ticket_charge', 'autotask_update_ticket_charge', 'autotask_delete_ticket_charge', 'autotask_get_ticket_history', 'autotask_search_ticket_history']
   },
   projects: {
     description: 'Search and create projects, tasks, phases, and project notes',

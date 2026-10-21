@@ -1027,6 +1027,77 @@ export class AutotaskService {
     throw new Error(`Resource ${resourceId} holds ${roles.length} active roles and Autotask needs exactly one: ${list}. Pass roleName (or roleID) to choose.`);
   }
 
+  /**
+   * Active resources eligible to serve `queueID` (PRD-20620: the candidate
+   * set for `autotask_assign_least_loaded_resource`).
+   *
+   * `ResourceRoles` carries `queueID` directly on each (resource, role,
+   * queue) assignment row (same entity `searchResourceRoles` reads for the
+   * resource -> roles direction, see the comment at its `isActive` filter
+   * above); this is the queue -> resources direction, which this repo has
+   * never queried before. `isActive` here follows the same convention as
+   * `searchResourceRoles`: it flags an active assignment, not a deactivated
+   * Autotask user account — consistent with how role resolution already
+   * treats "active" elsewhere in this file.
+   */
+  async getEligibleResourcesForQueue(queueID: number): Promise<{ resourceID: number }[]> {
+    const http = await this.ensureClient();
+    try {
+      this.logger.debug(`Finding eligible resources for queue ${queueID}`);
+      const assignments = await http.query<AutotaskResourceRole>(
+        'ResourceRoles',
+        [
+          { op: 'eq', field: 'queueID', value: queueID },
+          { op: 'eq', field: 'isActive', value: true }
+        ],
+        { maxRecords: 500 }
+      );
+      const resourceIDs = [...new Set(assignments.map(a => a.resourceID))];
+      this.logger.info(`Found ${resourceIDs.length} active eligible resource(s) for queue ${queueID}`);
+      return resourceIDs.map(resourceID => ({ resourceID }));
+    } catch (error) {
+      this.logger.error(`Failed to find eligible resources for queue ${queueID}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Current open-ticket count per resource, scoped to one queue (PRD-20620).
+   *
+   * "Open" reuses `searchTickets`' own default meaning of the word (`status
+   * noteq 5`, i.e. not Complete — see `searchTickets` above) so the two tools
+   * never disagree about what counts as open. Every id in `resourceIDs` is
+   * guaranteed a key in the result (0 when a resource has no open tickets in
+   * this queue), so callers can pick a minimum without a defined-ness check.
+   */
+  async countOpenTicketsByQueueAndResource(queueID: number, resourceIDs: number[]): Promise<Map<number, number>> {
+    const counts = new Map<number, number>(resourceIDs.map(id => [id, 0]));
+    if (resourceIDs.length === 0) {
+      return counts;
+    }
+    const http = await this.ensureClient();
+    try {
+      this.logger.debug(`Counting open tickets in queue ${queueID} for resources: ${resourceIDs.join(', ')}`);
+      const tickets = await http.query<AutotaskTicket>(
+        'Tickets',
+        [
+          { op: 'eq', field: 'queueID', value: queueID },
+          { op: 'in', field: 'assignedResourceID', value: resourceIDs },
+          { op: 'noteq', field: 'status', value: 5 } // 5 = Complete, same convention as searchTickets
+        ],
+        { maxRecords: 500 }
+      );
+      for (const ticket of tickets) {
+        if (ticket.assignedResourceID == null) continue;
+        counts.set(ticket.assignedResourceID, (counts.get(ticket.assignedResourceID) ?? 0) + 1);
+      }
+      return counts;
+    } catch (error) {
+      this.logger.error(`Failed to count open tickets in queue ${queueID}:`, error);
+      throw error;
+    }
+  }
+
   async searchResources(options: AutotaskQueryOptions = {}): Promise<AutotaskResource[]> {
     const http = await this.ensureClient();
     try {
