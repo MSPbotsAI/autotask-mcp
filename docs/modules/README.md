@@ -4,5 +4,6 @@ Maps a code path / product area in this repo to the module doc that records accu
 
 | Code path / area | Module doc |
 | `src/handlers/tool.handler.ts` ticket-assignment dispatch entries, `src/services/autotask.service.ts` eligibility/counting queries, `src/utils/queue-lock.ts` | `ticket-assignment.md` |
+| `src/utils/response.formatter.ts` compact-response `extraFields`, `src/handlers/tool.handler.ts`'s shared `COMPACT_SEARCH_TOOLS` call site and per-tool opt-in-field handler branches | `compact-response-fields.md` |
 
 Entries get appended here as tickets touch new areas worth tracking this way — see `docs/tickets/PRD-20620.md` Handoff section for the first entry.
