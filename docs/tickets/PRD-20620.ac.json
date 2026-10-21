@@ -4,9 +4,11 @@
     "ac": "AC1",
     "text": "Given 5 technicians in `technicians`, each starting at 0 matching tickets for the given status/queueIDs, when 10 tickets are assigned concurrently via autotask_assign_least_loaded_resource, then every technician ends up with exactly 2 tickets (max-min spread across technicians <= 1)",
     "type": "auto",
-    "tests": ["tests/assign-least-loaded.test.ts::spreads_concurrent_assignments_evenly_across_listed_technicians"],
+    "tests": [
+      "tests/assign-least-loaded.test.ts::spreads_concurrent_assignments_evenly_across_listed_technicians"
+    ],
     "result": "pass",
-    "evidence": "`npx jest assign-least-loaded` -> Tests: 10 passed, 10 total (exit 0). This test asserts spread === [2,2,2,2,2] across 5 technicians after 10 concurrent createTicket calls, and that every created ticket's queueID matches the single queueIDs entry given.",
+    "evidence": "`npx jest assign-least-loaded` -> Tests: 14 passed, 14 total (exit 0). This test asserts spread === [2,2,2,2,2] across 5 technicians after 10 concurrent createTicket calls, and that every created ticket queueID matches the single queueIDs entry given. Code review follow-up (Kaka Zhang, 2026-10-21): this test originally passed for the wrong reason -- STATUS was 1, which happened to equal the mock create-ticket routes bare default status, masking that the tool never set a created tickets own status. STATUS is now 8 (deliberately distinct from that default); this test only stays green because tool.handler.ts now defaults payload.status to the filter value on createTicket (see TC-DEV2).",
     "note": "r2: re-implemented against the new technicians/status/queueIDs contract (requirement change, see PRD-20620-r2.md Rework triage) -- same AC as round 1's TC1, different input shape."
   },
   {
@@ -14,7 +16,9 @@
     "ac": "AC2",
     "text": "Given `technicians` has exactly 1 entry, when 5 tickets are assigned, then all 5 go to that technician and no call errors",
     "type": "auto",
-    "tests": ["tests/assign-least-loaded.test.ts::assigns_all_tickets_to_the_sole_listed_technician"],
+    "tests": [
+      "tests/assign-least-loaded.test.ts::assigns_all_tickets_to_the_sole_listed_technician"
+    ],
     "result": "pass",
     "evidence": "`npx jest assign-least-loaded` -> Tests: 10 passed, 10 total (exit 0). Asserts 5/5 calls return isError=false and assignedResourceID equal to the sole listed technician.",
     "note": "r2: re-implemented against the new contract (see TC1 note)."
@@ -24,7 +28,9 @@
     "ac": "AC3",
     "text": "Given 3 technicians in `technicians` with existing matching-ticket counts of 5, 0, and 3, when 1 new ticket is assigned, then it goes to the technician with count 0",
     "type": "auto",
-    "tests": ["tests/assign-least-loaded.test.ts::picks_the_listed_technician_with_the_fewest_matching_tickets"],
+    "tests": [
+      "tests/assign-least-loaded.test.ts::picks_the_listed_technician_with_the_fewest_matching_tickets"
+    ],
     "result": "pass",
     "evidence": "`npx jest assign-least-loaded` -> Tests: 10 passed, 10 total (exit 0). Asserts assignedResourceID === IDLE (count 0) and consideredTechnicians reports HEAVY=5, IDLE=0, MEDIUM=3.",
     "note": "r2: re-implemented against the new contract (see TC1 note)."
@@ -34,9 +40,11 @@
     "ac": "AC4",
     "text": "Given two calls share the same status/queueIDs/technicians combination and are issued so their counting steps would overlap without serialization, when both complete, then the second call's decision reflects the first call's result, not a stale snapshot -- the two calls never both pick the same technician off the same stale count",
     "type": "auto",
-    "tests": ["tests/assign-least-loaded.test.ts::serializes_overlapping_calls_for_the_same_lock_key"],
+    "tests": [
+      "tests/assign-least-loaded.test.ts::serializes_overlapping_calls_for_the_same_lock_key"
+    ],
     "result": "pass",
-    "evidence": "`npx jest assign-least-loaded` -> Tests: 10 passed, 10 total (exit 0). Gates call A's Tickets/query to force a controlled overlap window with call B issued synchronously before any await; asserts call B's fetch calls only happen after the gate releases, and A picks R1 while B picks R2 (never the same resource).",
+    "evidence": "`npx jest assign-least-loaded` -> Tests: 14 passed, 14 total (exit 0). Gates call As Tickets/query to force a controlled overlap window with call B issued synchronously before any await; asserts B genuinely waits and then picks the other resource. Code review follow-up (Kaka Zhang, 2026-10-21): also exposed by the STATUS=8 change above (same masking as TC1 -- the created tickets own status is what makes the second calls count see the first calls write at all); passes now via the same createTicket default-status fix (TC-DEV2).",
     "note": "r2: lock key changed from String(queueID) to a composite of status/queueIDs/technician resourceIDs (see PRD-20620-r2.md Tech design Key flow)."
   },
   {
@@ -44,7 +52,9 @@
     "ac": "AC5",
     "text": "Given `technicians` is missing or an empty array, when a ticket is assigned, then the tool throws a distinct error (e.g. NoCandidateTechniciansError) and neither createTicket nor updateTicket is called",
     "type": "auto",
-    "tests": ["tests/assign-least-loaded.test.ts::rejects_assignment_when_no_candidate_technicians_given"],
+    "tests": [
+      "tests/assign-least-loaded.test.ts::rejects_assignment_when_no_candidate_technicians_given"
+    ],
     "result": "pass",
     "evidence": "`npx jest assign-least-loaded` -> Tests: 10 passed, 10 total (exit 0). Covers both `technicians` omitted and `technicians: []`; both return isError=true with the exact NoCandidateTechniciansError message, and asserts no POST /Tickets or PATCH /Tickets call ever happened.",
     "note": "r2: replaces round-1's 'zero eligible resources in a queue' case with 'technicians array missing/empty', since eligibility is now caller-supplied."
@@ -54,7 +64,9 @@
     "ac": "AC6",
     "text": "Given a technician has 10 total assigned tickets but only 2 match the given status/queueIDs filter, when counting that technician's load, then only the 2 matching tickets count toward their load -- the other 8 must not affect the selection",
     "type": "auto",
-    "tests": ["tests/assign-least-loaded.test.ts::only_counts_tickets_matching_the_status_and_queue_filter"],
+    "tests": [
+      "tests/assign-least-loaded.test.ts::only_counts_tickets_matching_the_status_and_queue_filter"
+    ],
     "result": "pass",
     "evidence": "`npx jest assign-least-loaded` -> Tests: 10 passed, 10 total (exit 0). Technician A has 2 matching + 8 non-matching-status + 1 wrong-queue tickets; asserts consideredTechnicians reports A=2 (not 10, not 3) and B=1, and the tool picks B.",
     "note": "r2: new case for the new status/queueIDs filtering requirement."
@@ -64,7 +76,9 @@
     "ac": "AC7",
     "text": "Given a successful assignment, when the tool returns its result, then `result` contains explicit typed fields for ticketID, assignedResourceID, assignedResourceRoleID, appliedFilter.status, appliedFilter.queueIDs, and consideredTechnicians[] (each with resourceID/roleID/matchingTicketCount) -- independent of what `message` says",
     "type": "auto",
-    "tests": ["tests/assign-least-loaded.test.ts::returns_a_fully_structured_result"],
+    "tests": [
+      "tests/assign-least-loaded.test.ts::returns_a_fully_structured_result"
+    ],
     "result": "pass",
     "evidence": "`npx jest assign-least-loaded` -> Tests: 10 passed, 10 total (exit 0). Asserts the exact shape: ticketID (number), assignedResourceID, assignedResourceRoleID (echoed from the chosen technician entry, not Autotask-resolved), appliedFilter === {status, queueIDs}, and consideredTechnicians as a typed array with resourceID/roleID/matchingTicketCount per entry.",
     "note": "r2: new case for the structured-output requirement ('传出的参数也需要结构化')."
@@ -74,7 +88,9 @@
     "ac": "AC8",
     "text": "Given createTicket is used with queueIDs of length 0, and separately with length 2, when the tool is invoked, then both report a distinct validation error and no ticket is created",
     "type": "auto",
-    "tests": ["tests/assign-least-loaded.test.ts::requires_exactly_one_queue_id_when_creating_a_ticket"],
+    "tests": [
+      "tests/assign-least-loaded.test.ts::requires_exactly_one_queue_id_when_creating_a_ticket"
+    ],
     "result": "pass",
     "evidence": "`npx jest assign-least-loaded` -> Tests: 10 passed, 10 total (exit 0). Covers queueIDs omitted and queueIDs with 2 entries, both with createTicket -> isError=true; also asserts the orthogonal case (ticketID reassignment, no createTicket) is unaffected by this rule (isError=false).",
     "note": "r2: new case -- queueIDs is now a counting filter (array, optional), so create-ticket needs its own rule for which single queue the new ticket lands in."
@@ -100,9 +116,59 @@
     "text": "Given a call gives both ticketID and createTicket, or neither, when autotask_assign_least_loaded_resource is invoked, then it reports a validation error rather than silently picking one interpretation",
     "type": "auto",
     "source": "dev",
-    "tests": ["tests/assign-least-loaded.test.ts::rejects a call that gives both or neither of ticketID/createTicket"],
+    "tests": [
+      "tests/assign-least-loaded.test.ts::rejects a call that gives both or neither of ticketID/createTicket"
+    ],
     "result": "pass",
     "evidence": "`npx jest assign-least-loaded` -> Tests: 10 passed, 10 total (exit 0). Rewritten for the required status/technicians fields (the old bare queueID-only call would now fail NoCandidateTechniciansError before reaching this check); both the neither-given and both-given cases return isError=true.",
     "note": "r2: rule is orthogonal to the technicians/status/queueIDs contract change and is unmodified in substance; test rewritten for the new required fields."
+  },
+  {
+    "id": "TC-DEV2",
+    "ac": "n/a (dev-sourced, code-review follow-up -- see handoff.md \"追加用例的效力\")",
+    "text": "MUST FIX (Kaka Zhang code review, 2026-10-21): given a createTicket call under a status filter that does not coincide with Autotasks own default status for a new ticket, when the tool creates the ticket, then it must set the new tickets own status to the filter value (unless the caller explicitly named a status in createTicket) so the NEXT call under the same filter actually counts it -- without this, a technician looks permanently unloaded under any status filter that is not the create-time default.",
+    "type": "auto",
+    "tests": [
+      "tests/assign-least-loaded.test.ts::a_created_tickets_own_status_is_set_so_the_next_call_sees_it"
+    ],
+    "result": "pass",
+    "evidence": "`npx jest assign-least-loaded` -> Tests: 14 passed, 14 total (exit 0). Two sequential (non-concurrent) createTicket calls for the same technicians/status/queueIDs: first lands on the lower-id technician, second must land on the other one; verified against a source revert this test fails (both land on the same technician) without the fix -- see PRD-20620 self-test note on red-before-fix verification.",
+    "source": "dev"
+  },
+  {
+    "id": "TC-DEV3",
+    "ac": "n/a (dev-sourced, code-review follow-up)",
+    "text": "MUST FIX, remaining gap: given the caller explicitly sets createTicket.status to a value different from the counting filter (a real shape -- workflow rules transition status asynchronously), when a second call arrives under the same filter before Autotasks own data reflects the first assignment, then the tool must still not repeat the same technician -- covered by an in-process reservation (assignment-reservations.ts), not by live Autotask data. Also verifies the reservation expires (TTL) rather than padding forever.",
+    "type": "auto",
+    "tests": [
+      "tests/assign-least-loaded.test.ts::an_explicit_createTicket_status_is_respected_and_the_reservation_covers_the_gap"
+    ],
+    "result": "pass",
+    "evidence": "`npx jest assign-least-loaded` -> Tests: 14 passed, 14 total (exit 0). Caller sets createTicket.status=1 while filtering status=8; tool leaves the created tickets real status at 1 (does not override explicit caller intent) but the second call still picks the other technician via the reservation; after advancing fake timers past the 2-minute TTL, a third call reverts to the lowest-id technician, proving the padding expires rather than accumulating.",
+    "source": "dev"
+  },
+  {
+    "id": "TC-DEV4",
+    "ac": "n/a (dev-sourced, code-review follow-up, SHOULD FIX #3)",
+    "text": "Given two calls share a status and at least one technician but are not identical sets (e.g. [A,B] and [A,B,C]), when both are issued so their counting steps would overlap, then they must still serialize on the shared technician(s) -- the original single combined-key lock missed this because the two calls composite keys differ.",
+    "type": "auto",
+    "tests": [
+      "tests/assign-least-loaded.test.ts::serializes_calls_whose_technician_sets_overlap_without_being_identical"
+    ],
+    "result": "pass",
+    "evidence": "`npx jest assign-least-loaded` -> Tests: 14 passed, 14 total (exit 0). Gates the first calls Tickets/query; the second call ([A,B,C]) issued synchronously must not write until the first ([A,B]) releases; asserts [A,B] picks A, [A,B,C] then picks B (never A again).",
+    "source": "dev"
+  },
+  {
+    "id": "TC-DEV5",
+    "ac": "n/a (dev-sourced, code-review follow-up, SHOULD FIX #4)",
+    "text": "Given an existing ticket being reassigned is itself one of its current assignees matching tickets, when counting that assignees load for the pick, then the ticket being moved must be excluded from their count (it is about to leave them) -- otherwise a tie-break can pile a second matching ticket onto the wrong technician.",
+    "type": "auto",
+    "tests": [
+      "tests/assign-least-loaded.test.ts::excludes_the_reassigned_tickets_own_count_from_its_current_assignee"
+    ],
+    "result": "pass",
+    "evidence": "`npx jest assign-least-loaded` -> Tests: 14 passed, 14 total (exit 0). TECH_HIGHs only matching ticket is the one being reassigned (ticketID=5001); TECH_LOW has one unrelated matching ticket. Without exclusion both read count=1 and the lowest-id tie-break picks TECH_LOW; asserts the tool instead reports TECH_HIGH=0 (excluded), TECH_LOW=1, and assigns to TECH_HIGH.",
+    "source": "dev"
   }
 ]
