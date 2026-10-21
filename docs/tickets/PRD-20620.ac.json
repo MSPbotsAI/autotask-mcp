@@ -2,62 +2,81 @@
   {
     "id": "TC1",
     "ac": "AC1",
-    "text": "Given 5 active eligible technicians in a queue, each starting at 0 open tickets, when 10 tickets are assigned concurrently via autotask_assign_least_loaded_resource, then every technician ends up with exactly 2 tickets (max-min spread across technicians <= 1)",
+    "text": "Given 5 technicians in `technicians`, each starting at 0 matching tickets for the given status/queueIDs, when 10 tickets are assigned concurrently via autotask_assign_least_loaded_resource, then every technician ends up with exactly 2 tickets (max-min spread across technicians <= 1)",
     "type": "auto",
-    "tests": ["tests/assign-least-loaded.test.ts::spreads_concurrent_assignments_evenly_across_eligible_resources"],
-    "result": "pass",
-    "evidence": "npx jest tests/assign-least-loaded.test.ts -- exit 0, 7/7 passed (2026-10-21). This case asserts tickets.length===10 and every resource's final count===2 (spread [2,2,2,2,2]) after Promise.all of 10 concurrent callTool() invocations against a stateful routed-fetch mock backed by a real AutotaskService+AutotaskToolHandler."
+    "tests": ["tests/assign-least-loaded.test.ts::spreads_concurrent_assignments_evenly_across_listed_technicians"],
+    "note": "r2: input contract changed from `queueID` auto-discovery to an explicit `technicians` array (requirement change, see PRD-20620-r2.md Rework triage) -- superseded round-1 test (same AC, different input shape); not yet re-implemented, pending next dev round."
   },
   {
     "id": "TC2",
     "ac": "AC2",
-    "text": "Given a queue has exactly 1 active eligible technician, when 5 tickets are assigned, then all 5 go to that technician and no call errors",
+    "text": "Given `technicians` has exactly 1 entry, when 5 tickets are assigned, then all 5 go to that technician and no call errors",
     "type": "auto",
-    "tests": ["tests/assign-least-loaded.test.ts::assigns_all_tickets_to_the_sole_eligible_resource"],
-    "result": "pass",
-    "evidence": "npx jest tests/assign-least-loaded.test.ts -- exit 0, 7/7 passed (2026-10-21). This case asserts isError is falsy and assignedResourceID equals the sole resource on all 5 sequential calls, and tickets.length===5 all assigned to it."
+    "tests": ["tests/assign-least-loaded.test.ts::assigns_all_tickets_to_the_sole_listed_technician"],
+    "note": "r2: input contract changed (see TC1 note); not yet re-implemented, pending next dev round."
   },
   {
     "id": "TC3",
     "ac": "AC3",
-    "text": "Given 3 eligible technicians with existing open-ticket counts of 5, 0, and 3, when 1 new ticket is assigned, then it goes to the technician with count 0",
+    "text": "Given 3 technicians in `technicians` with existing matching-ticket counts of 5, 0, and 3, when 1 new ticket is assigned, then it goes to the technician with count 0",
     "type": "auto",
-    "tests": ["tests/assign-least-loaded.test.ts::picks_the_resource_with_the_fewest_open_tickets"],
-    "result": "pass",
-    "evidence": "npx jest tests/assign-least-loaded.test.ts -- exit 0, 7/7 passed (2026-10-21). This case pre-seeds the mock's ticket list with 5/0/3 open tickets per resource, asserts the chosen assignedResourceID is the count-0 resource, and asserts the returned consideredResources array reports {5,0,3} per resource."
+    "tests": ["tests/assign-least-loaded.test.ts::picks_the_listed_technician_with_the_fewest_matching_tickets"],
+    "note": "r2: input contract changed (see TC1 note); not yet re-implemented, pending next dev round."
   },
   {
     "id": "TC4",
     "ac": "AC4",
-    "text": "Given two assignment calls for the same queue are issued so their internal counting steps would overlap without serialization, when both complete, then the second call's decision reflects the first call's result, not a stale snapshot -- the two calls never both pick the same resource off the same count",
+    "text": "Given two calls share the same status/queueIDs/technicians combination and are issued so their counting steps would overlap without serialization, when both complete, then the second call's decision reflects the first call's result, not a stale snapshot -- the two calls never both pick the same technician off the same stale count",
     "type": "auto",
-    "tests": ["tests/assign-least-loaded.test.ts::serializes_overlapping_calls_for_the_same_queue"],
-    "result": "pass",
-    "evidence": "npx jest tests/assign-least-loaded.test.ts -- exit 0, 7/7 passed (2026-10-21). This case gates call A's Tickets/query (open-ticket count read) behind a manually-released promise, fires call B synchronously right after A with nothing awaited in between, then asserts via 3 drained microtask ticks that call B has made zero fetch calls and zero tickets exist yet (proving the lock -- not timing luck -- is what prevents B from starting). After releasing the gate, asserts A picked resourceID 501 and B picked 502 (never the same resource), and that more fetch calls happened after release than before it."
+    "tests": ["tests/assign-least-loaded.test.ts::serializes_overlapping_calls_for_the_same_lock_key"],
+    "note": "r2: lock key changed from String(queueID) to a composite of status/queueIDs/technician resourceIDs (see PRD-20620-r2.md Tech design Key flow); not yet re-implemented, pending next dev round."
   },
   {
     "id": "TC5",
     "ac": "AC5",
-    "text": "Given a queue has zero active eligible technicians, when a ticket is assigned, then the tool throws a distinct NoEligibleResourceError and neither createTicket nor updateTicket is called",
+    "text": "Given `technicians` is missing or an empty array, when a ticket is assigned, then the tool throws a distinct error (e.g. NoCandidateTechniciansError) and neither createTicket nor updateTicket is called",
     "type": "auto",
-    "tests": ["tests/assign-least-loaded.test.ts::rejects_assignment_when_no_eligible_resource_exists"],
-    "result": "pass",
-    "evidence": "npx jest tests/assign-least-loaded.test.ts -- exit 0, 7/7 passed (2026-10-21). This case asserts result.isError===true, the serialized error message matches new NoEligibleResourceError(queueID).message exactly, and that the mock recorded no POST /Tickets and no PATCH /Tickets/777 call."
+    "tests": ["tests/assign-least-loaded.test.ts::rejects_assignment_when_no_candidate_technicians_given"],
+    "note": "r2: replaces round-1's 'zero eligible resources in a queue' case with 'technicians array missing/empty', since eligibility is now caller-supplied; not yet re-implemented, pending next dev round."
   },
   {
     "id": "TC6",
+    "ac": "AC6",
+    "text": "Given a technician has 10 total assigned tickets but only 2 match the given status/queueIDs filter, when counting that technician's load, then only the 2 matching tickets count toward their load -- the other 8 must not affect the selection",
+    "type": "auto",
+    "tests": ["tests/assign-least-loaded.test.ts::only_counts_tickets_matching_the_status_and_queue_filter"],
+    "note": "r2: new case for the new status/queueIDs filtering requirement."
+  },
+  {
+    "id": "TC7",
+    "ac": "AC7",
+    "text": "Given a successful assignment, when the tool returns its result, then `result` contains explicit typed fields for ticketID, assignedResourceID, assignedResourceRoleID, appliedFilter.status, appliedFilter.queueIDs, and consideredTechnicians[] (each with resourceID/roleID/matchingTicketCount) -- independent of what `message` says",
+    "type": "auto",
+    "tests": ["tests/assign-least-loaded.test.ts::returns_a_fully_structured_result"],
+    "note": "r2: new case for the structured-output requirement ('传出的参数也需要结构化')."
+  },
+  {
+    "id": "TC8",
+    "ac": "AC8",
+    "text": "Given createTicket is used with queueIDs of length 0, and separately with length 2, when the tool is invoked, then both report a distinct validation error and no ticket is created",
+    "type": "auto",
+    "tests": ["tests/assign-least-loaded.test.ts::requires_exactly_one_queue_id_when_creating_a_ticket"],
+    "note": "r2: new case -- queueIDs is now a counting filter (array, optional), so create-ticket needs its own rule for which single queue the new ticket lands in."
+  },
+  {
+    "id": "TC9",
     "ac": "AC1",
-    "text": "Given a live Autotask sandbox/INT queue with 3 or more active technicians, when 5 test-prefixed tickets are created through autotask_assign_least_loaded_resource, then the Autotask UI shows assignees spread per the least-open-count rule and each assignedResourceID matches what the tool reported",
+    "text": "Given a live Autotask sandbox/INT environment with a real technicians list, when 5 test-prefixed tickets are created/reassigned through autotask_assign_least_loaded_resource with a real status/queueIDs filter, then the Autotask UI shows assignees spread per the least-matching-count rule and each assignedResourceID/assignedResourceRoleID matches what the tool reported",
     "type": "manual",
     "steps": [
-      "In INT/staging with real Autotask credentials, identify a queue with 3 or more active technicians",
-      "Call autotask_assign_least_loaded_resource 5 times with a clearly test-prefixed ticket title",
-      "Open the queue in the Autotask UI and record each ticket's assignee",
-      "Compare against the tool's reported assignedResourceID for each call"
+      "In INT/staging with real Autotask credentials, pick 3 or more real technicians (resourceID + roleID) and a real status/queueIDs combination",
+      "Call autotask_assign_least_loaded_resource 5 times with a clearly test-prefixed ticket title, passing the same technicians/status/queueIDs each time",
+      "Open the queue(s) in the Autotask UI and record each ticket's assignee and role",
+      "Compare against the tool's reported assignedResourceID/assignedResourceRoleID for each call"
     ],
-    "expect": "Assignees are spread (no single technician holds more than ceil(5/3)=2 of the 5 tickets) and the UI's assignee matches the tool's reported assignedResourceID for every ticket",
+    "expect": "Assignees are spread (no single technician holds more than ceil(5/3)=2 of the 5 tickets) and the UI's assignee/role matches the tool's reported assignedResourceID/assignedResourceRoleID for every ticket",
     "result": "untested",
-    "evidence": "NOT EXECUTED: this sandbox has no AUTOTASK_USERNAME/AUTOTASK_SECRET credentials; needs dev/QA with live Autotask access after implementation. Unchanged from design -- still a local blind spot after implementation, per legs/dev.md S5's local-blind-spot rule (not a failure, not silently dropped)."
+    "evidence": "NOT EXECUTED: this sandbox has no AUTOTASK_USERNAME/AUTOTASK_SECRET credentials; needs dev/QA with live Autotask access after implementation. Same local blind spot as round 1's TC6, carried forward unchanged in substance (param shape updated)."
   },
   {
     "id": "TC-DEV1",
@@ -66,7 +85,6 @@
     "type": "auto",
     "source": "dev",
     "tests": ["tests/assign-least-loaded.test.ts::rejects a call that gives both or neither of ticketID/createTicket"],
-    "result": "pass",
-    "evidence": "npx jest tests/assign-least-loaded.test.ts -- exit 0, 7/7 passed (2026-10-21). Asserts isError===true for both the neither-given and both-given cases."
+    "note": "r2: rule is orthogonal to the technicians/status/queueIDs contract change and is unmodified; test file is being rewritten for the new contract (see PRD-20620-r2.md Change list) so this case will be re-added, not re-run as-is -- result/evidence reset pending next dev round."
   }
 ]
