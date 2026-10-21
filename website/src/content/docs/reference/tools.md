@@ -33,6 +33,7 @@ The Autotask MCP Server exposes 39 tools organized by entity type.
 | `autotask_search_tickets` | Search for tickets | `searchTerm`, `companyID`, `status`, `priority`, `queueID`, `assignedResourceID` |
 | `autotask_get_ticket_details` | Get full ticket details | `ticketId` (required) |
 | `autotask_create_ticket` | Create a new ticket | `title`, `companyID` (required), `priority`, `status`, `queueID`, `description` |
+| `autotask_assign_least_loaded_resource` | Assign a ticket (existing or new) to whichever active technician eligible for the queue has the fewest open tickets there, serializing same-queue calls so concurrent assignments don't collapse onto one person | `queueID` (required), one of `ticketID` or `createTicket`, `roleName` |
 
 ## Time Entries
 

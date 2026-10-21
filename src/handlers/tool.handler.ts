@@ -11,6 +11,7 @@ import { MappingService } from '../utils/mapping.service.js';
 import { mapWithConcurrency } from '../utils/concurrency.js';
 import { TOOL_DEFINITIONS, TOOL_CATEGORIES } from './tool.definitions.js';
 import { buildTicketCard } from './card.builder.js';
+import { assignmentLock } from '../utils/queue-lock.js';
 
 // Default concurrency for company/resource name enrichment. Autotask allows
 // only a handful of concurrent API threads per integration, so enrichment is
@@ -57,6 +58,19 @@ function buildTicketPayload(args: Record<string, any>): Record<string, any> {
     }
   }
   return payload;
+}
+
+/**
+ * Thrown by autotask_assign_least_loaded_resource (PRD-20620 AC5) when a
+ * queue has zero active eligible technicians. Kept distinct from a generic
+ * Error so callers (and tests) can tell "nobody to assign to" apart from an
+ * unrelated Autotask failure without parsing message text.
+ */
+export class NoEligibleResourceError extends Error {
+  constructor(public readonly queueID: number) {
+    super(`No active eligible technician found for queue ${queueID}. An Autotask administrator must assign at least one active resource to this queue before tickets can be auto-assigned there.`);
+    this.name = 'NoEligibleResourceError';
+  }
 }
 
 export interface McpTool {
@@ -926,6 +940,66 @@ export class AutotaskToolHandler {
         await this.fillAssignedResourceRole(payload, rest.assignedResourceRoleName);
         await s.updateTicket(ticketId, payload);
         return { result: ticketId, message: `Successfully updated ticket ${ticketId}` };
+      }],
+      ['autotask_assign_least_loaded_resource', async (a) => {
+        const { queueID, ticketID, createTicket, roleName } = a;
+        if (queueID == null) {
+          throw new Error('autotask_assign_least_loaded_resource requires queueID.');
+        }
+        if ((ticketID == null) === (createTicket == null)) {
+          throw new Error('autotask_assign_least_loaded_resource requires exactly one of ticketID or createTicket.');
+        }
+        // Serialize same-queue calls: the read (counts) and write (assignment)
+        // below must not interleave with another call for this queue, or both
+        // would pick the same "currently least-loaded" resource (PRD-20620 AC4).
+        return assignmentLock.run(String(queueID), async () => {
+          const eligible = await s.getEligibleResourcesForQueue(queueID);
+          if (eligible.length === 0) {
+            throw new NoEligibleResourceError(queueID);
+          }
+          const resourceIDs = eligible.map(r => r.resourceID);
+          const counts = await s.countOpenTicketsByQueueAndResource(queueID, resourceIDs);
+          const consideredResources = resourceIDs
+            .slice()
+            .sort((x, y) => x - y)
+            .map(resourceID => ({ resourceID, openTicketCount: counts.get(resourceID) ?? 0 }));
+          // Ties broken by lowest resourceID (AC3): consideredResources is
+          // sorted ascending by resourceID, and a strict `<` reduce keeps the
+          // first (lowest-id) entry among equal counts.
+          const chosen = consideredResources.reduce((best, cur) =>
+            cur.openTicketCount < best.openTicketCount ? cur : best
+          );
+
+          const payload: Record<string, any> = createTicket ? buildTicketPayload(createTicket) : {};
+          if (createTicket) {
+            // A new ticket has no pre-existing queue membership to inherit —
+            // pin it to the queue the resource was chosen from. (A reassigned
+            // ticket, by contrast, is assumed to already live in queueID,
+            // since that's the queue its new assignee's eligibility was
+            // checked against; this tool doesn't move it to a different one.)
+            payload.queueID = queueID;
+          }
+          payload.assignedResourceID = chosen.resourceID;
+          await this.fillAssignedResourceRole(payload, roleName);
+
+          const resultTicketID = ticketID != null
+            ? await (async () => { await s.updateTicket(ticketID, payload); return ticketID; })()
+            : await s.createTicket(payload);
+
+          const message = `Assigned ticket ${resultTicketID} to resource ${chosen.resourceID} ` +
+            `(${chosen.openTicketCount} open tickets in queue ${queueID}, lowest among ${consideredResources.length} eligible)`;
+          this.logger.info(message);
+
+          return {
+            result: {
+              ticketID: resultTicketID,
+              assignedResourceID: chosen.resourceID,
+              assignedResourceRoleID: payload.assignedResourceRoleID,
+              consideredResources
+            },
+            message
+          };
+        });
       }],
       // Ticket Charges
       ['autotask_get_ticket_charge', async (a) => {
