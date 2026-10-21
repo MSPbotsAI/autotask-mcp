@@ -1,0 +1,51 @@
+[
+  {
+    "id": "TC1",
+    "ac": "AC1",
+    "type": "auto",
+    "source": "dev",
+    "text": "Given a caller invokes autotask_search_contacts without includeUserDefinedFields (or with it explicitly false), When the search returns matched contacts, Then no item in the response contains a userDefinedFields key and the response is otherwise identical in shape to today's",
+    "tests": ["tests/contact-search-custom-fields.test.ts > default-off: no userDefinedFields in response, and Autotask request carries no IncludeFields", "tests/contact-search-custom-fields.test.ts > explicit false behaves the same as omitted"]
+  },
+  {
+    "id": "TC2",
+    "ac": "AC2",
+    "type": "auto",
+    "source": "dev",
+    "text": "Given a contact has one or more Autotask custom fields set, When autotask_search_contacts is called with includeUserDefinedFields: true, Then that contact's item in the response includes a userDefinedFields array with that contact's actual name/value pairs",
+    "tests": ["tests/contact-search-custom-fields.test.ts > opt-in: returns the actual userDefinedFields for a contact that has them"]
+  },
+  {
+    "id": "TC3",
+    "ac": "AC3",
+    "type": "auto",
+    "source": "dev",
+    "text": "Given a contact has no custom fields set in Autotask, When autotask_search_contacts is called with includeUserDefinedFields: true, Then the call does not error and that contact's item does not contain fabricated userDefinedFields data (key absent or an empty array)",
+    "tests": ["tests/contact-search-custom-fields.test.ts > opt-in: does not fabricate userDefinedFields for a contact with none set"]
+  },
+  {
+    "id": "TC4",
+    "ac": "AC4",
+    "type": "auto",
+    "source": "dev",
+    "text": "Given includeUserDefinedFields: true, When autotask_search_contacts returns matched contacts, Then every field normally present in the response today (id, firstName, lastName, emailAddress, companyID, and the enhanced company name when resolvable) is still present and unchanged",
+    "tests": ["tests/contact-search-custom-fields.test.ts > opt-in: every normally-returned field is still present and unchanged"]
+  },
+  {
+    "id": "TC5",
+    "ac": "AC5",
+    "type": "auto",
+    "source": "dev",
+    "modified": "Original text assumed zero matches return a bare 'Found 0 contacts' message without error. Actual pre-existing behavior (tool.handler.ts buildNotFoundMessage/errorToolResult, since #225, uniform across all autotask_search_* tools, unconditional on includeUserDefinedFields) is an isError:true anti-hallucination guard. Re-verified: the flag does not introduce a new error path or change this behavior at all (asserted equal to the no-flag case). Flagging for requirement owner: if zero-match + includeUserDefinedFields:true should NOT error, that is a platform-wide behavior change out of this ticket's scope (see Non-goals) and needs its own ticket.",
+    "text": "Given includeUserDefinedFields: true, When the search matches zero contacts, Then the tool hits the same pre-existing no-fabrication error path as without the flag -- no new error, no crash, no fabricated data",
+    "tests": ["tests/contact-search-custom-fields.test.ts > opt-in: zero matches hits the same pre-existing no-fabrication error as without the flag (no new error path, no crash)"]
+  },
+  {
+    "id": "TC6",
+    "ac": "AC6",
+    "type": "auto",
+    "source": "dev",
+    "text": "Given a caller filters by companyID and passes includeUserDefinedFields: true, When autotask_search_contacts runs, Then only contacts belonging to that companyID are returned (with their custom fields) -- the new flag does not relax or bypass the existing company-scoping filter and cannot be used to retrieve another company's contacts or their custom fields",
+    "tests": ["tests/contact-search-custom-fields.test.ts > opt-in: companyID filter is not relaxed -- no cross-company leak"]
+  }
+]

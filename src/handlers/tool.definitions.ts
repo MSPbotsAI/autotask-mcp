@@ -328,7 +328,7 @@ export const TOOL_DEFINITIONS: McpTool[] = [
         },
         page: {
           type: 'number',
-          
+
           minimum: 1
         },
         pageSize: {
@@ -336,6 +336,10 @@ export const TOOL_DEFINITIONS: McpTool[] = [
           description: 'Max 200',
           minimum: 1,
           maximum: 200
+        },
+        includeUserDefinedFields: {
+          type: 'boolean',
+          description: "When true, include each contact's Autotask custom fields (userDefinedFields, an array of {name, value}) in the response. Off by default — responses stay the same size as today unless a caller opts in." // PRD-20317
         }
       },
       required: []

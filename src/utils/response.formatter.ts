@@ -21,7 +21,7 @@ export interface CompactResponse {
  * Fields to include in compact responses, per entity type.
  * These are the minimum fields needed for identification and triage.
  */
-const SUMMARY_FIELDS: Record<EntityType, string[]> = {
+export const SUMMARY_FIELDS: Record<EntityType, string[]> = {
   tickets: ['id', 'ticketNumber', 'title', 'status', 'priority', 'companyID', 'assignedResourceID', 'assignedResourceRoleID', 'createDate', 'dueDateTime'],
   companies: ['id', 'companyName', 'isActive', 'phone', 'city', 'state'],
   contacts: ['id', 'firstName', 'lastName', 'emailAddress', 'companyID'],
@@ -36,13 +36,28 @@ const SUMMARY_FIELDS: Record<EntityType, string[]> = {
 /**
  * Pick only the summary fields from an item, inlining any _enhanced names.
  */
-function pickSummaryFields(item: Record<string, any>, entityType: EntityType): Record<string, any> {
+function pickSummaryFields(
+  item: Record<string, any>,
+  entityType: EntityType,
+  extraFields?: string[]
+): Record<string, any> {
   const fields = SUMMARY_FIELDS[entityType];
   const compact: Record<string, any> = {};
 
   for (const field of fields) {
     if (item[field] !== undefined && item[field] !== null) {
       compact[field] = item[field];
+    }
+  }
+
+  // PRD-20317: caller-requested extra fields (e.g. contacts' userDefinedFields)
+  // that survive the compact allowlist above. Only set for tools that opt in
+  // (extraFields is undefined for every other caller of formatCompactResponse).
+  if (extraFields) {
+    for (const field of extraFields) {
+      if (item[field] !== undefined && item[field] !== null) {
+        compact[field] = item[field];
+      }
     }
   }
 
@@ -68,13 +83,13 @@ function pickSummaryFields(item: Record<string, any>, entityType: EntityType): R
 export function formatCompactResponse(
   items: Record<string, any>[],
   entityType: EntityType,
-  options: { page?: number; pageSize?: number; totalFetched?: number }
+  options: { page?: number; pageSize?: number; totalFetched?: number; extraFields?: string[] | undefined }
 ): CompactResponse {
   const page = options.page || 1;
   const pageSize = options.pageSize || 25;
   const hasMore = items.length >= pageSize;
 
-  const compactItems = items.map(item => pickSummaryFields(item, entityType));
+  const compactItems = items.map(item => pickSummaryFields(item, entityType, options.extraFields));
 
   const hint = hasMore
     ? `Use page:${page + 1} for more results, or use get_ticket_details/show commands for full data on specific items`
