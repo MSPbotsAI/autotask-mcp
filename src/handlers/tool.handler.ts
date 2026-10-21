@@ -61,15 +61,16 @@ function buildTicketPayload(args: Record<string, any>): Record<string, any> {
 }
 
 /**
- * Thrown by autotask_assign_least_loaded_resource (PRD-20620 AC5) when a
- * queue has zero active eligible technicians. Kept distinct from a generic
- * Error so callers (and tests) can tell "nobody to assign to" apart from an
- * unrelated Autotask failure without parsing message text.
+ * Thrown by autotask_assign_least_loaded_resource (PRD-20620 r2 AC5) when the
+ * caller gives no candidate technicians. Round 1 had this tool discover
+ * eligible technicians itself (NoEligibleResourceError, now removed); r2
+ * moves that responsibility to the caller, so "nobody to assign to" is now a
+ * caller-input error, not something this tool can discover on its own.
  */
-export class NoEligibleResourceError extends Error {
-  constructor(public readonly queueID: number) {
-    super(`No active eligible technician found for queue ${queueID}. An Autotask administrator must assign at least one active resource to this queue before tickets can be auto-assigned there.`);
-    this.name = 'NoEligibleResourceError';
+export class NoCandidateTechniciansError extends Error {
+  constructor() {
+    super('autotask_assign_least_loaded_resource requires a non-empty technicians array naming at least one candidate resourceID/roleID.');
+    this.name = 'NoCandidateTechniciansError';
   }
 }
 
@@ -942,60 +943,82 @@ export class AutotaskToolHandler {
         return { result: ticketId, message: `Successfully updated ticket ${ticketId}` };
       }],
       ['autotask_assign_least_loaded_resource', async (a) => {
-        const { queueID, ticketID, createTicket, roleName } = a;
-        if (queueID == null) {
-          throw new Error('autotask_assign_least_loaded_resource requires queueID.');
+        const { status, queueIDs, technicians, ticketID, createTicket } = a as {
+          status: number;
+          queueIDs?: number[];
+          technicians?: { resourceID: number; roleID: number }[];
+          ticketID?: number;
+          createTicket?: Record<string, any>;
+        };
+        if (!technicians || technicians.length === 0) {
+          throw new NoCandidateTechniciansError();
         }
         if ((ticketID == null) === (createTicket == null)) {
           throw new Error('autotask_assign_least_loaded_resource requires exactly one of ticketID or createTicket.');
         }
-        // Serialize same-queue calls: the read (counts) and write (assignment)
-        // below must not interleave with another call for this queue, or both
-        // would pick the same "currently least-loaded" resource (PRD-20620 AC4).
-        return assignmentLock.run(String(queueID), async () => {
-          const eligible = await s.getEligibleResourcesForQueue(queueID);
-          if (eligible.length === 0) {
-            throw new NoEligibleResourceError(queueID);
-          }
-          const resourceIDs = eligible.map(r => r.resourceID);
-          const counts = await s.countOpenTicketsByQueueAndResource(queueID, resourceIDs);
-          const consideredResources = resourceIDs
+        if (createTicket && (queueIDs?.length ?? 0) !== 1) {
+          // AC8: a brand-new ticket needs exactly one destination queue;
+          // queueIDs is a counting filter here, not "the ticket's queue", so
+          // it must be pinned down to exactly one entry to disambiguate.
+          throw new Error('autotask_assign_least_loaded_resource requires exactly one queueIDs entry when createTicket is given (queueIDs is a load-counting filter, and a new ticket needs exactly one destination queue).');
+        }
+        // Serialize overlapping calls: the read (counts) and write
+        // (assignment) below must not interleave with another call counting
+        // the same status/queueIDs/technicians combination, or both would
+        // pick the same "currently least-loaded" technician (PRD-20620 r2
+        // AC4). Sorted so argument order never changes the key.
+        const sortedQueueIDs = [...(queueIDs ?? [])].sort((x, y) => x - y);
+        const sortedResourceIDs = technicians.map(t => t.resourceID).slice().sort((x, y) => x - y);
+        const lockKey = `${status}|${JSON.stringify(sortedQueueIDs)}|${JSON.stringify(sortedResourceIDs)}`;
+
+        return assignmentLock.run(lockKey, async () => {
+          const resourceIDs = technicians.map(t => t.resourceID);
+          const counts = await s.countMatchingTicketsByResource(status, queueIDs, resourceIDs);
+          const roleByResource = new Map(technicians.map(t => [t.resourceID, t.roleID]));
+          const consideredTechnicians = resourceIDs
             .slice()
             .sort((x, y) => x - y)
-            .map(resourceID => ({ resourceID, openTicketCount: counts.get(resourceID) ?? 0 }));
-          // Ties broken by lowest resourceID (AC3): consideredResources is
+            .map(resourceID => ({
+              resourceID,
+              roleID: roleByResource.get(resourceID)!,
+              matchingTicketCount: counts.get(resourceID) ?? 0
+            }));
+          // Ties broken by lowest resourceID (AC3): consideredTechnicians is
           // sorted ascending by resourceID, and a strict `<` reduce keeps the
           // first (lowest-id) entry among equal counts.
-          const chosen = consideredResources.reduce((best, cur) =>
-            cur.openTicketCount < best.openTicketCount ? cur : best
+          const chosen = consideredTechnicians.reduce((best, cur) =>
+            cur.matchingTicketCount < best.matchingTicketCount ? cur : best
           );
 
           const payload: Record<string, any> = createTicket ? buildTicketPayload(createTicket) : {};
           if (createTicket) {
-            // A new ticket has no pre-existing queue membership to inherit —
-            // pin it to the queue the resource was chosen from. (A reassigned
-            // ticket, by contrast, is assumed to already live in queueID,
-            // since that's the queue its new assignee's eligibility was
-            // checked against; this tool doesn't move it to a different one.)
-            payload.queueID = queueID;
+            // queueIDs is validated to have exactly 1 entry above (AC8); that
+            // entry becomes the new ticket's queue, same way round 1 pinned
+            // payload.queueID to the (then single) queueID.
+            payload.queueID = queueIDs![0];
           }
           payload.assignedResourceID = chosen.resourceID;
-          await this.fillAssignedResourceRole(payload, roleName);
+          // r2: the caller already supplies the role per technician (no
+          // Autotask role-resolution lookup needed any more — see Tech
+          // design "Open questions" in PRD-20620-r2.md).
+          payload.assignedResourceRoleID = chosen.roleID;
 
           const resultTicketID = ticketID != null
             ? await (async () => { await s.updateTicket(ticketID, payload); return ticketID; })()
             : await s.createTicket(payload);
 
+          const appliedFilter = { status, queueIDs: queueIDs ?? [] };
           const message = `Assigned ticket ${resultTicketID} to resource ${chosen.resourceID} ` +
-            `(${chosen.openTicketCount} open tickets in queue ${queueID}, lowest among ${consideredResources.length} eligible)`;
+            `(${chosen.matchingTicketCount} matching tickets under status ${status}, lowest among ${consideredTechnicians.length} listed technicians)`;
           this.logger.info(message);
 
           return {
             result: {
               ticketID: resultTicketID,
               assignedResourceID: chosen.resourceID,
-              assignedResourceRoleID: payload.assignedResourceRoleID,
-              consideredResources
+              assignedResourceRoleID: chosen.roleID,
+              appliedFilter,
+              consideredTechnicians
             },
             message
           };

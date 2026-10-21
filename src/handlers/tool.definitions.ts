@@ -728,13 +728,31 @@ export const TOOL_DEFINITIONS: McpTool[] = [
   },
   {
     name: 'autotask_assign_least_loaded_resource',
-    description: 'Assign a ticket (existing or brand-new) to whichever active technician eligible for the given queue currently has the fewest open tickets there, instead of the caller naming a specific resource. Calls for the same queue serialize internally, so tickets processed back-to-back or concurrently spread across the team instead of all landing on the same person (PRD-20620). Give exactly one of ticketID (to reassign) or createTicket (to create-and-assign in one call).',
+    description: 'Assign a ticket (existing or brand-new) to whichever of the caller-supplied technicians currently has the fewest tickets matching the given status (optionally narrowed to given queues), instead of the caller naming a specific resource or this tool discovering eligible technicians itself. Calls that share the same status/queueIDs/technicians combination serialize internally, so tickets processed back-to-back or concurrently spread across the listed team instead of all landing on the same person (PRD-20620 r2). Give exactly one of ticketID (to reassign) or createTicket (to create-and-assign in one call).',
     inputSchema: {
       type: 'object',
       properties: {
-        queueID: {
+        technicians: {
+          type: 'array',
+          description: 'Candidate technicians to consider for this assignment. The tool only ever picks from this list — it does not query Autotask for queue membership. Must have at least 1 entry.',
+          minItems: 1,
+          items: {
+            type: 'object',
+            properties: {
+              resourceID: { type: 'number', description: 'Autotask resource ID of the candidate technician.' },
+              roleID: { type: 'number', description: 'Role ID to assign on this technician if chosen. Echoed back as-is into assignedResourceRoleID — not re-resolved against Autotask.' }
+            },
+            required: ['resourceID', 'roleID']
+          }
+        },
+        status: {
           type: 'number',
-          description: 'Queue ID to pick an eligible technician from. Use autotask_list_queues to discover valid IDs.'
+          description: 'Ticket status ID used to filter which of each listed technician\'s tickets count toward their load. Use autotask_get_field_info (entityType "Tickets", fieldName "status") to discover valid values.'
+        },
+        queueIDs: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'Optional queue IDs to further narrow the load count — only tickets in one of these queues (and matching status) count. Omit to count across all queues for the given status. Required to contain exactly 1 entry when createTicket is used (a new ticket needs exactly one destination queue).'
         },
         ticketID: {
           type: 'number',
@@ -784,12 +802,8 @@ export const TOOL_DEFINITIONS: McpTool[] = [
           },
           required: ['companyID', 'title', 'description']
         },
-        roleName: {
-          type: 'string',
-          description: 'Name of the chosen resource\'s role, e.g. "Help Desk", used instead of auto-resolving when that resource holds several active roles.'
-        }
       },
-      required: ['queueID']
+      required: ['status', 'technicians']
     }
   },
 

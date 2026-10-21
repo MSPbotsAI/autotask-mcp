@@ -1028,72 +1028,41 @@ export class AutotaskService {
   }
 
   /**
-   * Active resources eligible to serve `queueID` (PRD-20620: the candidate
-   * set for `autotask_assign_least_loaded_resource`).
+   * Current matching-ticket count per resource, scoped to a caller-supplied
+   * status and optional queue filter (PRD-20620 r2). Replaces round 1's
+   * `countOpenTicketsByQueueAndResource` (fixed `status noteq 5`, single
+   * required `queueID`): r2 no longer assumes a fixed "open" meaning or a
+   * single queue — the caller's own `status` decides what counts, and
+   * `queueIDs` is an optional narrowing filter rather than a required scope.
    *
-   * `ResourceRoles` carries `queueID` directly on each (resource, role,
-   * queue) assignment row (same entity `searchResourceRoles` reads for the
-   * resource -> roles direction, see the comment at its `isActive` filter
-   * above); this is the queue -> resources direction, which this repo has
-   * never queried before. `isActive` here follows the same convention as
-   * `searchResourceRoles`: it flags an active assignment, not a deactivated
-   * Autotask user account — consistent with how role resolution already
-   * treats "active" elsewhere in this file.
+   * Every id in `resourceIDs` is guaranteed a key in the result (0 when a
+   * resource has no matching tickets), so callers can pick a minimum without
+   * a defined-ness check.
    */
-  async getEligibleResourcesForQueue(queueID: number): Promise<{ resourceID: number }[]> {
-    const http = await this.ensureClient();
-    try {
-      this.logger.debug(`Finding eligible resources for queue ${queueID}`);
-      const assignments = await http.query<AutotaskResourceRole>(
-        'ResourceRoles',
-        [
-          { op: 'eq', field: 'queueID', value: queueID },
-          { op: 'eq', field: 'isActive', value: true }
-        ],
-        { maxRecords: 500 }
-      );
-      const resourceIDs = [...new Set(assignments.map(a => a.resourceID))];
-      this.logger.info(`Found ${resourceIDs.length} active eligible resource(s) for queue ${queueID}`);
-      return resourceIDs.map(resourceID => ({ resourceID }));
-    } catch (error) {
-      this.logger.error(`Failed to find eligible resources for queue ${queueID}:`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * Current open-ticket count per resource, scoped to one queue (PRD-20620).
-   *
-   * "Open" reuses `searchTickets`' own default meaning of the word (`status
-   * noteq 5`, i.e. not Complete — see `searchTickets` above) so the two tools
-   * never disagree about what counts as open. Every id in `resourceIDs` is
-   * guaranteed a key in the result (0 when a resource has no open tickets in
-   * this queue), so callers can pick a minimum without a defined-ness check.
-   */
-  async countOpenTicketsByQueueAndResource(queueID: number, resourceIDs: number[]): Promise<Map<number, number>> {
+  async countMatchingTicketsByResource(status: number, queueIDs: number[] | undefined, resourceIDs: number[]): Promise<Map<number, number>> {
     const counts = new Map<number, number>(resourceIDs.map(id => [id, 0]));
     if (resourceIDs.length === 0) {
       return counts;
     }
     const http = await this.ensureClient();
     try {
-      this.logger.debug(`Counting open tickets in queue ${queueID} for resources: ${resourceIDs.join(', ')}`);
-      const tickets = await http.query<AutotaskTicket>(
-        'Tickets',
-        [
-          { op: 'eq', field: 'queueID', value: queueID },
-          { op: 'in', field: 'assignedResourceID', value: resourceIDs },
-          { op: 'noteq', field: 'status', value: 5 } // 5 = Complete, same convention as searchTickets
-        ],
-        { maxRecords: 500 }
-      );
+      const queueDesc = queueIDs && queueIDs.length > 0 ? `queues ${queueIDs.join(', ')}` : 'all queues';
+      this.logger.debug(`Counting status-${status} tickets in ${queueDesc} for resources: ${resourceIDs.join(', ')}`);
+      const filters: Array<{ op: string; field: string; value: unknown }> = [
+        { op: 'eq', field: 'status', value: status },
+        { op: 'in', field: 'assignedResourceID', value: resourceIDs }
+      ];
+      if (queueIDs && queueIDs.length > 0) {
+        filters.push({ op: 'in', field: 'queueID', value: queueIDs });
+      }
+      const tickets = await http.query<AutotaskTicket>('Tickets', filters, { maxRecords: 500 });
       for (const ticket of tickets) {
         if (ticket.assignedResourceID == null) continue;
         counts.set(ticket.assignedResourceID, (counts.get(ticket.assignedResourceID) ?? 0) + 1);
       }
       return counts;
     } catch (error) {
-      this.logger.error(`Failed to count open tickets in queue ${queueID}:`, error);
+      this.logger.error(`Failed to count matching tickets for status ${status}:`, error);
       throw error;
     }
   }

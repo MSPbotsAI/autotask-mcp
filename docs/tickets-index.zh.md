@@ -4,4 +4,4 @@
 
 | 工单 | 状态 | 工作分支 | 备注 |
 | PRD-20217 | 冻结 @ 5c34372 | `dev01.mbagent/PRD-20217` | 只有英文文档（`PRD-20217.md`）——早于 2026-10-08 的中英双版规矩，不做追溯补档 |
-| PRD-20620 | 冻结 @ 2601250 | `dev01.mbagent/PRD-20620` | `autotask_assign_least_loaded_resource`；详见 `docs/modules/ticket-assignment.zh.md` |
+| PRD-20620 | 冻结 @ 43c0078 | `dev01.mbagent/PRD-20620` | `autotask_assign_least_loaded_resource`；r2 返工以 `PRD-20620-r2.md` 取代第一轮的 `PRD-20620.md`（破坏性契约改动）；详见 `docs/modules/ticket-assignment.zh.md` |
