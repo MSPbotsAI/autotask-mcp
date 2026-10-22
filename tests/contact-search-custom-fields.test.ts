@@ -17,6 +17,16 @@ import { Logger } from '../src/utils/logger';
 import type { McpServerConfig } from '../src/types/mcp';
 import { _resetZoneUrlCache } from '../src/utils/config';
 
+// PRD-20317 r2: QA (comment 90170265051691, 2026-10-21) found that
+// includeUserDefinedFields:true made a real Autotask instance return
+// HTTP 500 "Unable to find userDefinedFields in the Contact Entity" --
+// Autotask rejects 'userDefinedFields' inside a query's IncludeFields.
+// The r1 mock below didn't model that rejection, so all 6 r1 cases were
+// green against a mock the real API disagreed with. r2 fixes the handler
+// to never send IncludeFields for this call (see tool.handler.ts), and
+// this mock now rejects the previously-accepted shape so a regression
+// here fails the suite instead of silently diverging from prod again.
+
 const logger = new Logger('error');
 
 const config: McpServerConfig = {
@@ -71,6 +81,20 @@ function mockAutotaskContacts(): { calls: Array<{ path: string; method: string; 
       return { ok: false, status: 404, headers: { get: () => null }, text: async () => `no route for ${path}` } as unknown as Response;
     }
 
+    // Real Autotask behavior (confirmed 2026-10-21 against a live instance,
+    // PRD-20317 r2): a query's IncludeFields rejects 'userDefinedFields' with
+    // HTTP 500. This is the exact failure QA hit; the mock must reproduce it
+    // so a regression that reintroduces the old IncludeFields superset fails
+    // the suite instead of passing against a too-lenient mock again.
+    if (Array.isArray(body?.IncludeFields) && body.IncludeFields.includes('userDefinedFields')) {
+      return {
+        ok: false,
+        status: 500,
+        headers: { get: () => null },
+        text: async () => 'Unable to find userDefinedFields in the Contact Entity',
+      } as unknown as Response;
+    }
+
     const filter: any[] = body?.filter ?? [];
     const companyEq = filter.find((f: any) => f.op === 'eq' && f.field === 'companyID');
     let items = companyEq ? CONTACTS.filter((c) => c.companyID === companyEq.value) : CONTACTS.slice();
@@ -87,18 +111,16 @@ function mockAutotaskContacts(): { calls: Array<{ path: string; method: string; 
       );
     }
 
-    const includeUDF = Array.isArray(body?.IncludeFields) && body.IncludeFields.includes('userDefinedFields');
-    const outItems = items.map((c) => {
-      if (includeUDF) return c;
-      const { userDefinedFields, ...rest } = c;
-      return rest;
-    });
-
+    // Real Autotask returns every field -- including userDefinedFields -- by
+    // default whenever no IncludeFields is sent at all (r2 confirmed this).
+    // The app's opt-in gating happens downstream in the compact-response
+    // formatter (pickSummaryFields' extraFields allowlist), not at the
+    // Autotask query layer, so the raw item here always carries it.
     return {
       ok: true,
       status: 200,
       headers: { get: () => null },
-      text: async () => JSON.stringify({ items: outItems, pageDetails: { count: outItems.length } }),
+      text: async () => JSON.stringify({ items, pageDetails: { count: items.length } }),
     } as unknown as Response;
   });
   return { calls };
@@ -150,7 +172,7 @@ describe('autotask_search_contacts - includeUserDefinedFields (PRD-20317)', () =
 
   // TC2 / AC2
   test('opt-in: returns the actual userDefinedFields for a contact that has them', async () => {
-    mockAutotaskContacts();
+    const { calls } = mockAutotaskContacts();
 
     const result = await handler().callTool('autotask_search_contacts', {
       companyID: 100,
@@ -160,6 +182,28 @@ describe('autotask_search_contacts - includeUserDefinedFields (PRD-20317)', () =
     const body = JSON.parse((result.content[0] as any).text as string);
     const jane = body.items.find((i: any) => i.id === 1);
     expect(jane.userDefinedFields).toEqual([{ name: 'PreferredContactMethod', value: 'Email' }]);
+
+    // r2 regression guard: the flag must never translate into an Autotask
+    // IncludeFields request. r1 did this and got HTTP 500 from the real API
+    // (QA comment 90170265051691) even though this same mock, pre-r2, let it
+    // through silently.
+    const query = calls.find((c) => c.path.endsWith('/Contacts/query'))!.body;
+    expect(query.IncludeFields).toBeUndefined();
+  });
+
+  // Regression guard (source: dev, not in the groomed AC ledger) -- directly
+  // exercises the service layer to prove the mock's HTTP 500 simulation is
+  // reachable and wired to the same error shape QA saw against the real API,
+  // and that it would still catch a future regression that reintroduces
+  // IncludeFields:['userDefinedFields'] from a different call site than
+  // tool.handler.ts's autotask_search_contacts branch.
+  test("regression: Autotask's real IncludeFields:['userDefinedFields'] rejection is reproduced by the mock", async () => {
+    mockAutotaskContacts();
+    const service = new AutotaskService(config, logger);
+
+    await expect(
+      service.searchContacts({ companyID: 100, includeFields: ['userDefinedFields'] })
+    ).rejects.toThrow('Unable to find userDefinedFields in the Contact Entity');
   });
 
   // TC3 / AC3
