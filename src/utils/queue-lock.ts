@@ -33,3 +33,29 @@ export class KeyedAsyncLock {
 
 // Shared across all callers in this process — one lock per queueID string.
 export const assignmentLock = new KeyedAsyncLock();
+
+/**
+ * Acquire more than one key on `lock` for the duration of `fn` (PRD-20620
+ * code review follow-up).
+ *
+ * The original r2 call site locked on one combined key built from the whole
+ * (status, queueIDs, technicians) tuple — so two calls whose technician
+ * lists *overlap* without being identical (`[A,B]` vs `[A,B,C]`) hashed to
+ * different keys and ran fully concurrently, even though both read/write
+ * resource A and B's counts. That breaks AC4's "overlapping ... combination"
+ * guarantee for anything short of an exact-set match.
+ *
+ * Locking on every `(status, resourceID)` pair in the candidate set instead
+ * means any two calls sharing a status *and* at least one technician must
+ * still serialize, regardless of how the rest of each call's technician
+ * list or queueIDs differ. Keys are de-duplicated and sorted before nesting
+ * `run` calls so that two callers requesting overlapping key sets always
+ * acquire them in the same order — the classic fixed lock-ordering rule to
+ * avoid an A-waits-for-B / B-waits-for-A deadlock.
+ */
+export function runWithKeys<T>(lock: KeyedAsyncLock, keys: string[], fn: () => Promise<T>): Promise<T> {
+  const unique = Array.from(new Set(keys)).sort();
+  const run = (index: number): Promise<T> =>
+    index >= unique.length ? fn() : lock.run(unique[index], () => run(index + 1));
+  return run(0);
+}

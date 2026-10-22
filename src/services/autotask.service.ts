@@ -1044,8 +1044,22 @@ export class AutotaskService {
    * Every id in `resourceIDs` is guaranteed a key in the result (0 when a
    * resource has no matching tickets), so callers can pick a minimum without
    * a defined-ness check.
+   *
+   * `excludeTicketID` (PRD-20620 code review follow-up): when the caller is
+   * reassigning an *existing* ticket (the `ticketID` path, as opposed to
+   * `createTicket`), that ticket may already be counted toward its current
+   * assignee's load. Since this call's whole point is to move it to a
+   * (possibly different) technician, counting it against the current
+   * assignee would bias the pick away from them for a ticket they are about
+   * to lose — pass the ticket's own id here to exclude it from every
+   * resource's tally.
    */
-  async countMatchingTicketsByResource(status: number, queueIDs: number[] | undefined, resourceIDs: number[]): Promise<Map<number, number>> {
+  async countMatchingTicketsByResource(
+    status: number,
+    queueIDs: number[] | undefined,
+    resourceIDs: number[],
+    excludeTicketID?: number
+  ): Promise<Map<number, number>> {
     const counts = new Map<number, number>(resourceIDs.map(id => [id, 0]));
     if (resourceIDs.length === 0) {
       return counts;
@@ -1061,9 +1075,25 @@ export class AutotaskService {
       if (queueIDs && queueIDs.length > 0) {
         filters.push({ op: 'in', field: 'queueID', value: queueIDs });
       }
-      const tickets = await http.query<AutotaskTicket>('Tickets', filters, { maxRecords: 500 });
+      // Cap raised from the single-page 500 to 5,000 (code review follow-up,
+      // PRD-20620): `http.query` already walks `pageDetails.nextPageUrl`
+      // transparently up to this total cap (see autotask-http.ts), so this
+      // was silently truncating per-resource counts above 500 matching
+      // tickets rather than genuinely limiting the query. 5,000 matches the
+      // scale already accepted elsewhere in this file (`listAllCompanies`'s
+      // 20,000) for a per-status/queue/resource-set slice, which is expected
+      // to be far smaller than a company list.
+      const maxRecords = 5_000;
+      const tickets = await http.query<AutotaskTicket>('Tickets', filters, { maxRecords });
+      if (tickets.length === maxRecords) {
+        this.logger.error(
+          `countMatchingTicketsByResource: hit maxRecords cap (${maxRecords}) for status ${status} in ${queueDesc}. ` +
+          'Counts below may be truncated and the least-loaded pick could be wrong.'
+        );
+      }
       for (const ticket of tickets) {
         if (ticket.assignedResourceID == null) continue;
+        if (excludeTicketID != null && ticket.id === excludeTicketID) continue;
         counts.set(ticket.assignedResourceID, (counts.get(ticket.assignedResourceID) ?? 0) + 1);
       }
       return counts;

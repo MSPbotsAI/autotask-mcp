@@ -20,3 +20,14 @@
 - 进程内锁（`src/utils/queue-lock.ts`，round 1 记录的机制本身未变）现在的 key 是 `status`、排序后的 `queueIDs`、排序后的 `technicians[].resourceID` 三者的组合——不再只是 `queueID`。两个技术人员/状态/队列组合彼此不相交的调用不再互相等待，即便按 round 1 的 key 它们本来会共享同一个队列。
 - `NoEligibleResourceError`（round 1 记录，一个 Autotask 查询结果错误）被 `NoCandidateTechniciansError` 取代（一个调用方输入错误，在任何 Autotask 调用之前就抛出）——这个区别很关键，因为 r2 把"谁有资格"的判断责任从这个工具移交给了调用方。
 - 这是对一个**已经发布到生产环境**的契约做的**破坏性改动**（round 1 发布后数小时，据 Lucas Chen 的评论）。没有引入 feature flag 或双契约过渡期——可接受的影响面见 `docs/tickets/PRD-20620-r2.md` 的「上线与回滚」一节。
+
+## PRD-20620 代码评审跟进 · 2026-10-21
+
+在 `main@42ec6ac`（r2 自己的合并，由 Leo Yang 自助发布）上的一次代码评审发现 round 2 的修复在真实条件下并没有真正生效——同一轮、同一份 AC，只是实现层面的修复（代码提交 `d08d8fa`，在 `dev01.mbagent/PRD-20620` 分支上；完整经过见 `docs/tickets/PRD-20620-r2.md` 的「代码评审跟进」一节）。
+
+- **一张工单自己的 `status` 不会自动等于调用方的计数过滤条件。** 这个工具会立刻写入 `assignedResourceID`/`assignedResourceRoleID`，下一次计数查询确实能看到这两个字段——但它从来没有为新建工单写过 `status`，所以本工具自己的写入会不会被再次计入，完全取决于 Autotask 的新建默认值是否恰好等于调用方过滤用的 `status`。`tool.handler.ts` 的 createTicket 分支（提交 `d08d8fa`）现在默认把 `payload.status` 设为过滤值，除非调用方自己的 `createTicket` 已经显式设置了一个。对重新分配（`ticketID`）路径来说这从来不是问题——工单的 status 本来是什么就是什么,和本工具的写入无关。
+- **进程内锁的 key 必须按资源分别加锁，不能是整次调用一把组合锁。** round 2 的 key 是整个 `(status, queueIDs, technicians)` 元组；两次调用的技术人员名单有重叠但不完全相同（`[A,B]` 对 `[A,B,C]`）时会散列成不同的 key，即便两者都在读写资源 A、B 的计数，也会完全并发执行。`queue-lock.ts` 的 `runWithKeys`（提交 `d08d8fa`）现在改为对候选集合里每个 `(status, resourceID)` 分别加锁，排序后嵌套获取，避免重叠 key 集合之间死锁。
+- **新增了一层预留计数，用来兜住状态默认值修复盖不到的缺口**：`src/utils/assignment-reservations.ts`（新增于 `d08d8fa`）是一个进程内、带 TTL（2 分钟）的计数器，记录"刚被本工具分配、Autotask 自己的查询可能还看不到"的数量，按 `(status, resourceID)` 存，刻意忽略 `queueIDs`（一种"宁可多算不可少算"的简化，完整权衡见该文件自己的注释）。它覆盖的场景：调用方显式把 `createTicket.status` 设成和计数过滤条件不同的值，以及（覆盖得弱一些，因为不知道工单的队列）重新分配路径。
+- **重新分配一张工单时，现在会把这张工单从它当前负责人自己的计数里排除**（`countMatchingTicketsByResource(..., excludeTicketID)`，`autotask.service.ts` 提交 `d08d8fa`）——否则一张即将被移走的工单仍然会被算进原负责人的负载,可能影响最终的选择。
+- `countMatchingTicketsByResource` 的 `maxRecords` 从 `500` 提到 `5,000`（提交 `d08d8fa`）——`http.query` 本来就会通过 `nextPageUrl` 透明翻页直到这个总上限，所以 500 只是在静默截断超过这个数的单资源计数，不是真的在限制查询范围。
+- **仍然未解决、留给 Ops 确认，本次跟进没有修**：这把锁、以及新加的预留计数，都只在进程内生效。这个仓是一个 Cloudflare Worker（`wrangler.json`、`src/worker.ts`）；如果同一个 Autotask 租户真的同时跑了不止一个 isolate/副本，这两套机制都挡不住它们之间的竞态。round 1 已经把这个列为已知的非目标——本次跟进没有改变这一点；下一张真正要把它修好的单，需要的是一把跨 isolate 的持久锁（例如 Cloudflare Durable Object），那是一次基础设施改动，不是工具逻辑层面的改动。

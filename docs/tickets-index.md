@@ -4,4 +4,4 @@ One row per `docs/tickets/PRD-XXXXX.md`, tracking whether it's still open on its
 
 | Ticket | Status | Work branch | Notes |
 | PRD-20217 | frozen @ 5c34372 | `dev01.mbagent/PRD-20217` | English doc only (`PRD-20217.md`) — predates the 2026-10-08 dual-language rule, not backfilled retroactively |
-| PRD-20620 | frozen @ 43c0078 | `dev01.mbagent/PRD-20620` | `autotask_assign_least_loaded_resource`; r2 rework superseded round 1's `PRD-20620.md` with `PRD-20620-r2.md` (breaking contract change); see `docs/modules/ticket-assignment.md` |
+| PRD-20620 | frozen @ d08d8fa | `dev01.mbagent/PRD-20620` | `autotask_assign_least_loaded_resource`; r2 rework superseded round 1's `PRD-20620.md` with `PRD-20620-r2.md` (breaking contract change); code review follow-up (same round, no new AC) re-froze at `d08d8fa` (was `43c0078`); see `docs/modules/ticket-assignment.md` |

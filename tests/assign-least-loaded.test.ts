@@ -35,6 +35,7 @@ import { AutotaskService } from '../src/services/autotask.service';
 import { Logger } from '../src/utils/logger';
 import type { McpServerConfig } from '../src/types/mcp';
 import { _resetZoneUrlCache } from '../src/utils/config';
+import { assignmentReservations } from '../src/utils/assignment-reservations';
 
 const logger = new Logger('error');
 
@@ -152,6 +153,11 @@ function parseResult(toolResult: any): any {
 
 beforeEach(() => {
   _resetZoneUrlCache();
+  // Isolation: the reservation store (code review follow-up) is a
+  // process-wide singleton, same lifetime rationale as `assignmentLock`.
+  // Tests here use distinct resourceIDs per case, but clearing explicitly
+  // means that stays a convention, not a load-bearing requirement.
+  assignmentReservations.clear();
 });
 
 afterEach(() => {
@@ -159,7 +165,17 @@ afterEach(() => {
 });
 
 const QUEUE = 29682901;
-const STATUS = 1; // "open"-equivalent stand-in; this tool no longer assumes any fixed meaning for it.
+// "open"-equivalent stand-in; this tool no longer assumes any fixed meaning
+// for it. Deliberately NOT 1: `mockAutotask`'s create-ticket route defaults
+// a new row's `status` to 1 when the request body does not set one
+// (`status: body.status ?? 1`, matching Autotask's own "New" default this
+// mock models). Code review (2026-10-21) found that round 2's STATUS=1 here
+// coincided with that default and masked the real bug: a created ticket's
+// `status` only matched the counting filter by accident of both being 1,
+// not because the tool ever set it. Using 8 means every createTicket-based
+// test below now genuinely exercises "does the tool make its own writes
+// visible to the next count query," not just "does count ever go above 0."
+const STATUS = 8;
 
 function tech(resourceID: number, roleID = 501): { resourceID: number; roleID: number } {
   return { resourceID, roleID };
@@ -458,5 +474,192 @@ describe('autotask_assign_least_loaded_resource', () => {
       createTicket: { companyID: 1, title: 't', description: 'd' },
     });
     expect(both.isError).toBe(true);
+  });
+
+  // Code review follow-up (Kaka Zhang, 2026-10-21, "back to dev"), MUST FIX.
+  // Reproduces the originally-reported bug for the createTicket path under a
+  // STATUS value that does NOT coincide with the mock's bare creation
+  // default (see the STATUS constant's comment above): two SEQUENTIAL
+  // (not concurrent — the lock from TC4 is not what is under test here)
+  // calls for the same technicians/status/queueIDs must still spread across
+  // both technicians, because the tool must make the first ticket's status
+  // match the filter so the second call's live Autotask count actually sees
+  // it. Before this fix, a created ticket's `status` was never set by the
+  // tool at all, so the mock (and real Autotask) left it at its own
+  // creation default — which only matched STATUS=1 by accident in round 2's
+  // original test. With STATUS=8 and no fix, this test fails: both tickets
+  // land on the lower-id technician.
+  test('a_created_tickets_own_status_is_set_so_the_next_call_sees_it', async () => {
+    const [LOW, HIGH] = [1201, 1202];
+    const technicians = [LOW, HIGH].map(r => tech(r));
+    const { tickets } = mockAutotask({ tickets: [] });
+    const h = handler();
+
+    const first = await h.callTool('autotask_assign_least_loaded_resource', {
+      status: STATUS,
+      queueIDs: [QUEUE],
+      technicians,
+      createTicket: { companyID: 1, title: 'first', description: 'd' },
+    });
+    const second = await h.callTool('autotask_assign_least_loaded_resource', {
+      status: STATUS,
+      queueIDs: [QUEUE],
+      technicians,
+      createTicket: { companyID: 1, title: 'second', description: 'd' },
+    });
+
+    expect(first.isError).toBeFalsy();
+    expect(second.isError).toBeFalsy();
+    const firstResource = parseResult(first).data.assignedResourceID;
+    const secondResource = parseResult(second).data.assignedResourceID;
+    expect(firstResource).toBe(LOW); // both start at 0, lowest id wins first
+    expect(secondResource).toBe(HIGH); // must NOT be LOW again
+    expect(tickets.find(t => t.id === parseResult(first).data.ticketID)?.status).toBe(STATUS);
+  });
+
+  // Code review follow-up, same MUST FIX: when the caller's own
+  // `createTicket` already names a status, the tool must respect it (not
+  // silently override deliberate caller intent) — this is the one case the
+  // default-status fix above does NOT close, and the in-memory reservation
+  // in assignment-reservations.ts is the safety net that must catch it
+  // instead. Also exercises the reservation expiring: after the TTL, the
+  // store stops padding counts and a third call can land back on the first
+  // technician on the strength of live Autotask data alone, which is the
+  // intended trade-off (see assignment-reservations.ts's file comment).
+  test('an_explicit_createTicket_status_is_respected_and_the_reservation_covers_the_gap', async () => {
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+    try {
+      const [LOW, HIGH] = [1301, 1302];
+      const technicians = [LOW, HIGH].map(r => tech(r));
+      const { tickets } = mockAutotask({ tickets: [] });
+      const h = handler();
+
+      const first = await h.callTool('autotask_assign_least_loaded_resource', {
+        status: STATUS,
+        queueIDs: [QUEUE],
+        technicians,
+        // Caller explicitly wants new tickets created as "New" (1), distinct
+        // from the STATUS this call is counting load under (8) — a real
+        // shape: workflow rules move status to 8 later, asynchronously.
+        createTicket: { companyID: 1, title: 'first', description: 'd', status: 1 },
+      });
+      expect(first.isError).toBeFalsy();
+      expect(parseResult(first).data.assignedResourceID).toBe(LOW);
+      // The tool did not override the caller's explicit status.
+      expect(tickets.find(t => t.id === parseResult(first).data.ticketID)?.status).toBe(1);
+
+      const second = await h.callTool('autotask_assign_least_loaded_resource', {
+        status: STATUS,
+        queueIDs: [QUEUE],
+        technicians,
+        createTicket: { companyID: 1, title: 'second', description: 'd', status: 1 },
+      });
+      expect(second.isError).toBeFalsy();
+      // Live Autotask data alone would still show both technicians at 0
+      // (neither created ticket has status 8) — the reservation from the
+      // first call is the only reason this does not repeat onto LOW.
+      expect(parseResult(second).data.assignedResourceID).toBe(HIGH);
+
+      // Advance past the reservation TTL (default 2 minutes) and confirm the
+      // padding expires rather than accumulating forever.
+      jest.advanceTimersByTime(3 * 60 * 1000);
+
+      const third = await h.callTool('autotask_assign_least_loaded_resource', {
+        status: STATUS,
+        queueIDs: [QUEUE],
+        technicians,
+        createTicket: { companyID: 1, title: 'third', description: 'd', status: 1 },
+      });
+      expect(third.isError).toBeFalsy();
+      // Both reservations expired, live Autotask counts are both still 0
+      // (neither prior ticket ever reached status 8) -- lowest id wins again.
+      expect(parseResult(third).data.assignedResourceID).toBe(LOW);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  // Code review follow-up, SHOULD FIX #3: two calls whose technician lists
+  // overlap but are not identical ([A,B] vs [A,B,C]) must still serialize,
+  // because they can both read/write resource A and B's counts. Round 2's
+  // original lock key (the whole status/queueIDs/technicians tuple hashed
+  // to one string) hashed these to two different keys and let them race.
+  test('serializes_calls_whose_technician_sets_overlap_without_being_identical', async () => {
+    const [A, B, C] = [1401, 1402, 1403];
+    const { calls, tickets, releaseGate } = mockAutotask({
+      tickets: [],
+      gateTicketsQueryCall: 1,
+    });
+    const h = handler();
+
+    const callAB = h.callTool('autotask_assign_least_loaded_resource', {
+      status: STATUS,
+      queueIDs: [QUEUE],
+      technicians: [A, B].map(r => tech(r)),
+      createTicket: { companyID: 1, title: 'AB', description: 'd' },
+    });
+    const callABC = h.callTool('autotask_assign_least_loaded_resource', {
+      status: STATUS,
+      queueIDs: [QUEUE],
+      technicians: [A, B, C].map(r => tech(r)),
+      createTicket: { companyID: 1, title: 'ABC', description: 'd' },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(tickets).toHaveLength(0); // neither call has written yet -- ABC genuinely waited on AB
+
+    releaseGate();
+    const [resultAB, resultABC] = await Promise.all([callAB, callABC]);
+
+    expect(resultAB.isError).toBeFalsy();
+    expect(resultABC.isError).toBeFalsy();
+    expect(tickets).toHaveLength(2);
+
+    const pickAB = parseResult(resultAB).data.assignedResourceID;
+    const pickABC = parseResult(resultABC).data.assignedResourceID;
+    // AB sees both candidates at 0, picks A (lowest id). ABC must then see
+    // A already at 1 and pick whichever of {B, C} is lowest (B) -- never A.
+    expect(pickAB).toBe(A);
+    expect(pickABC).toBe(B);
+    expect(calls.length).toBeGreaterThan(0);
+  });
+
+  // Code review follow-up, SHOULD FIX #4: reassigning a ticket that is
+  // itself one of its current assignee's matching tickets must not count
+  // it against them -- this call's whole point is to move it away.
+  test('excludes_the_reassigned_tickets_own_count_from_its_current_assignee', async () => {
+    const [TECH_LOW, TECH_HIGH] = [1101, 1102];
+    const technicians = [TECH_LOW, TECH_HIGH].map(r => tech(r));
+    const existingTickets: TicketRow[] = [
+      // The ticket this call reassigns -- currently TECH_HIGH's only
+      // matching ticket. Without exclusion this still counts toward
+      // TECH_HIGH even though it is about to leave them.
+      { id: 5001, queueID: QUEUE, assignedResourceID: TECH_HIGH, status: STATUS },
+      // An unrelated matching ticket already on TECH_LOW.
+      { id: 5002, queueID: QUEUE, assignedResourceID: TECH_LOW, status: STATUS },
+    ];
+    const { tickets } = mockAutotask({ tickets: existingTickets });
+    const h = handler();
+
+    const result = await h.callTool('autotask_assign_least_loaded_resource', {
+      status: STATUS,
+      queueIDs: [QUEUE],
+      technicians,
+      ticketID: 5001,
+    });
+
+    expect(result.isError).toBeFalsy();
+    const data = parseResult(result).data;
+    const considered = new Map(data.consideredTechnicians.map((c: any) => [c.resourceID, c.matchingTicketCount]));
+    // TECH_HIGH's own ticket (5001) is excluded -> 0, not 1. Without the
+    // fix both would read 1 and the lowest-id tie-break would pick
+    // TECH_LOW instead, which is the wrong technician to pile a second
+    // matching ticket onto.
+    expect(considered.get(TECH_HIGH)).toBe(0);
+    expect(considered.get(TECH_LOW)).toBe(1);
+    expect(data.assignedResourceID).toBe(TECH_HIGH);
+    expect(tickets.find(t => t.id === 5001)?.assignedResourceID).toBe(TECH_HIGH);
   });
 });

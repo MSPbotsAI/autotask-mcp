@@ -11,7 +11,8 @@ import { MappingService } from '../utils/mapping.service.js';
 import { mapWithConcurrency } from '../utils/concurrency.js';
 import { TOOL_DEFINITIONS, TOOL_CATEGORIES } from './tool.definitions.js';
 import { buildTicketCard } from './card.builder.js';
-import { assignmentLock } from '../utils/queue-lock.js';
+import { assignmentLock, runWithKeys } from '../utils/queue-lock.js';
+import { assignmentReservations } from '../utils/assignment-reservations.js';
 
 // Default concurrency for company/resource name enrichment. Autotask allows
 // only a handful of concurrent API threads per integration, so enrichment is
@@ -971,17 +972,32 @@ export class AutotaskToolHandler {
           throw new Error('autotask_assign_least_loaded_resource requires exactly one queueIDs entry when createTicket is given (queueIDs is a load-counting filter, and a new ticket needs exactly one destination queue).');
         }
         // Serialize overlapping calls: the read (counts) and write
-        // (assignment) below must not interleave with another call counting
-        // the same status/queueIDs/technicians combination, or both would
-        // pick the same "currently least-loaded" technician (PRD-20620 r2
-        // AC4). Sorted so argument order never changes the key.
-        const sortedQueueIDs = [...(queueIDs ?? [])].sort((x, y) => x - y);
+        // (assignment) below must not interleave with another call that
+        // shares this call's status AND at least one of these resourceIDs,
+        // or both could pick the same "currently least-loaded" technician
+        // (PRD-20620 r2 AC4). Locking on a single combined key (the whole
+        // status/queueIDs/technicians tuple, as round 2 originally did)
+        // misses this: two calls for technician sets [A,B] and [A,B,C] hash
+        // to different keys and would run fully concurrently even though
+        // both read/write A and B's counts (code review follow-up,
+        // 2026-10-21). Locking on every (status, resourceID) pair instead
+        // — via `runWithKeys`, which sorts and nests so overlapping key sets
+        // are always acquired in the same order — closes that gap. queueIDs
+        // is deliberately NOT part of the lock key: it only narrows which
+        // of a resource's tickets count, it does not change which
+        // underlying (status, resourceID) counts two calls might race on.
         const sortedResourceIDs = technicians.map(t => t.resourceID).slice().sort((x, y) => x - y);
-        const lockKey = `${status}|${JSON.stringify(sortedQueueIDs)}|${JSON.stringify(sortedResourceIDs)}`;
+        const lockKeys = sortedResourceIDs.map(resourceID => `${status}:${resourceID}`);
 
-        return assignmentLock.run(lockKey, async () => {
+        return runWithKeys(assignmentLock, lockKeys, async () => {
           const resourceIDs = technicians.map(t => t.resourceID);
-          const counts = await s.countMatchingTicketsByResource(status, queueIDs, resourceIDs);
+          // Exclude the ticket being reassigned from its own current
+          // assignee's count (SHOULD FIX #4, code review follow-up): this
+          // call is about to move `ticketID` (if given) to whoever is
+          // chosen below, so counting it against its current assignee would
+          // bias the pick away from that assignee for a ticket they are
+          // about to lose.
+          const autotaskCounts = await s.countMatchingTicketsByResource(status, queueIDs, resourceIDs, ticketID ?? undefined);
           const roleByResource = new Map(technicians.map(t => [t.resourceID, t.roleID]));
           const consideredTechnicians = resourceIDs
             .slice()
@@ -989,7 +1005,15 @@ export class AutotaskToolHandler {
             .map(resourceID => ({
               resourceID,
               roleID: roleByResource.get(resourceID)!,
-              matchingTicketCount: counts.get(resourceID) ?? 0
+              // MUST FIX (code review follow-up, 2026-10-21): the live
+              // Autotask count above reflects reality only once a ticket's
+              // `status` field actually equals the caller's filter — this
+              // tool's own writes do not guarantee that (see the createTicket
+              // default below and assignment-reservations.ts's file comment
+              // for the full story). Add this process's own not-yet-expired
+              // reservations so a technician assigned moments ago by this
+              // same tool is not counted as still fully unloaded.
+              matchingTicketCount: (autotaskCounts.get(resourceID) ?? 0) + assignmentReservations.countFor(status, resourceID)
             }));
           // Ties broken by lowest resourceID (AC3): consideredTechnicians is
           // sorted ascending by resourceID, and a strict `<` reduce keeps the
@@ -1004,6 +1028,22 @@ export class AutotaskToolHandler {
             // entry becomes the new ticket's queue, same way round 1 pinned
             // payload.queueID to the (then single) queueID.
             payload.queueID = queueIDs![0];
+            // MUST FIX (code review follow-up, 2026-10-21): default the new
+            // ticket's own `status` to the filter value we are about to
+            // count future calls against, unless the caller's own
+            // `createTicket` already named a status explicitly (respect
+            // deliberate caller intent — e.g. a workflow that always creates
+            // tickets as "New" regardless of the counting filter). Without
+            // this, a created ticket's real Autotask status is whatever
+            // Autotask defaults to, which need not equal `status` at all —
+            // every future call under the same filter would silently never
+            // count it, not just miss it for a brief window. This closes
+            // that permanently for the common case; assignmentReservations
+            // below is the remaining safety net for the explicit-override
+            // case and for the (less common) reassignment path.
+            if (payload.status === undefined) {
+              payload.status = status;
+            }
           }
           payload.assignedResourceID = chosen.resourceID;
           // r2: the caller already supplies the role per technician (no
@@ -1014,6 +1054,7 @@ export class AutotaskToolHandler {
           const resultTicketID = ticketID != null
             ? await (async () => { await s.updateTicket(ticketID, payload); return ticketID; })()
             : await s.createTicket(payload);
+          assignmentReservations.add(status, chosen.resourceID);
 
           const appliedFilter = { status, queueIDs: queueIDs ?? [] };
           const message = `Assigned ticket ${resultTicketID} to resource ${chosen.resourceID} ` +
